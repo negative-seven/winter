@@ -1,0 +1,35 @@
+use crate::get_trampoline;
+use winapi::um::winuser::{MSG, WM_CHAR, WM_KEYDOWN, WM_KEYUP};
+
+pub extern "system" fn get_keyboard_state(key_states: *mut bool) {
+    for i in 0..256 {
+        unsafe {
+            *(key_states.offset(i)) = false;
+        }
+    }
+}
+
+pub extern "system" fn get_key_state(_: u32) -> u16 {
+    0
+}
+
+pub extern "system" fn get_async_key_state(_: u32) -> u16 {
+    0
+}
+
+pub unsafe extern "system" fn peek_message(
+    message_pointer: *mut MSG,
+    arg1: u32,
+    arg2: u32,
+    arg3: u32,
+    arg4: u32,
+) -> u32 {
+    let trampoline: extern "system" fn(*mut MSG, u32, u32, u32, u32) -> u32 =
+        std::mem::transmute(get_trampoline("PeekMessageA"));
+
+    let result = trampoline(message_pointer, arg1, arg2, arg3, arg4);
+    if result != 0 && matches!((*message_pointer).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
+        (*message_pointer).message = 0;
+    }
+    result
+}
