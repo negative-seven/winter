@@ -1,4 +1,4 @@
-use crate::get_trampoline;
+use crate::{get_trampoline, BUSY_WAIT_COUNT, SIMULATED_PERFORMANCE_COUNTER_FREQUENCY, TICKS};
 use winapi::um::winuser::{MSG, WM_CHAR, WM_KEYDOWN, WM_KEYUP};
 
 pub extern "system" fn get_keyboard_state(key_states: *mut bool) {
@@ -32,4 +32,37 @@ pub unsafe extern "system" fn peek_message(
         (*message_pointer).message = 0;
     }
     result
+}
+
+pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
+    // due to pointer alignment issues, frequency must be split into two u32 chunks
+
+    let mut busy_wait_count = BUSY_WAIT_COUNT.write();
+    *busy_wait_count += 1;
+    if *busy_wait_count >= 100 {
+        *TICKS.write() += 1;
+        *busy_wait_count = 0;
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    unsafe {
+        *frequency = SIMULATED_PERFORMANCE_COUNTER_FREQUENCY as u32;
+        *frequency.offset(1) = (SIMULATED_PERFORMANCE_COUNTER_FREQUENCY >> 32) as u32;
+    }
+
+    1
+}
+
+pub extern "system" fn query_performance_counter(count: *mut u32) -> u32 {
+    // due to pointer alignment issues, count must be split into two u32 chunks
+
+    #[allow(clippy::cast_possible_truncation)]
+    unsafe {
+        let simulated_performance_counter =
+            *TICKS.read() * SIMULATED_PERFORMANCE_COUNTER_FREQUENCY / 60;
+        *count = simulated_performance_counter as u32;
+        *count.offset(1) = (simulated_performance_counter >> 32) as u32;
+    }
+
+    1
 }
