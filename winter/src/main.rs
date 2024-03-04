@@ -13,11 +13,16 @@ fn main() -> Result<()> {
     let injected_dll_path = arguments
         .next()
         .expect("missing argument: injected dll path");
+    let injected_dll_name = std::path::Path::new(&injected_dll_path)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap(); // TODO: handle errors
 
     let process = Process::create(&executable_path, true)?;
     process.inject_dll(&injected_dll_path)?;
 
-    let initialize_function = process.get_export_address("hooks.dll", "initialize")?;
+    let initialize_function = process.get_export_address(injected_dll_name, "initialize")?;
     process.create_thread(initialize_function, true, None)?;
 
     for thread in process
