@@ -6,7 +6,9 @@ use winapi::{
     shared::minwindef::FALSE,
     um::{
         handleapi::CloseHandle,
-        processthreadsapi::{GetThreadId, OpenThread, ResumeThread},
+        processthreadsapi::{GetExitCodeThread, GetThreadId, OpenThread, ResumeThread},
+        synchapi::WaitForSingleObject,
+        winbase::{INFINITE, WAIT_FAILED},
         winnt::THREAD_SUSPEND_RESUME,
     },
 };
@@ -52,6 +54,22 @@ impl Thread {
         debug!("success");
         Ok(())
     }
+
+    #[instrument(err)]
+    pub fn join(&self) -> Result<u32, JoinError> {
+        unsafe {
+            if WaitForSingleObject(self.handle, INFINITE) == WAIT_FAILED {
+                return Err(io::Error::last_os_error().into());
+            }
+
+            let mut exit_code = 0u32;
+            if GetExitCodeThread(self.handle, &mut exit_code) == 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+
+            Ok(exit_code)
+        }
+    }
 }
 
 impl Drop for Thread {
@@ -67,3 +85,7 @@ pub struct FromIdError(#[from] io::Error);
 #[derive(Debug, Error)]
 #[error("failed to resume thread")]
 pub struct ResumeError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to join thread")]
+pub struct JoinError(#[from] io::Error);

@@ -1,11 +1,8 @@
 use super::thread::Thread;
 use std::{
     ffi::{CStr, CString, NulError},
-    fmt::Debug,
     io,
     mem::{size_of, transmute},
-    thread,
-    time::Duration,
 };
 use thiserror::Error;
 use tracing::{debug, instrument, Level};
@@ -28,7 +25,7 @@ use winapi::{
         winnt::{
             IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER, IMAGE_EXPORT_DIRECTORY,
             IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, MEM_COMMIT,
-            PAGE_READWRITE,
+            PAGE_EXECUTE_READ, PAGE_READWRITE,
         },
     },
 };
@@ -125,6 +122,18 @@ impl Process {
     pub fn allocate_read_write_memory(&self, size: usize) -> Result<usize, io::Error> {
         let pointer =
             unsafe { VirtualAllocEx(self.handle, NULL, size, MEM_COMMIT, PAGE_READWRITE) } as usize;
+        if pointer == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        Ok(pointer)
+    }
+
+    #[instrument(ret(level = Level::DEBUG), err)]
+    pub fn allocate_read_execute_memory(&self, size: usize) -> Result<usize, io::Error> {
+        let pointer =
+            unsafe { VirtualAllocEx(self.handle, NULL, size, MEM_COMMIT, PAGE_EXECUTE_READ) }
+                as usize;
         if pointer == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -341,7 +350,7 @@ impl Process {
         debug!("get module address in target process");
         let module_address = self.get_module_address(module_name)?;
 
-        debug!("read dos header from {module_address:x} and verify magic");
+        debug!("read dos header from 0x{module_address:x} and verify magic");
         let dos_header = unsafe { self.read::<IMAGE_DOS_HEADER>(module_address) }?;
         if dos_header.e_magic != 0x5a4d {
             return Err(InvalidModuleHeadersError.into());
@@ -407,29 +416,50 @@ impl Process {
             CString::new(library_path).map_err(LibraryPathContainsNulError)?;
 
         debug!("write no-op function");
-        let buffer = self.allocate_read_write_memory(1)?;
-        self.write(buffer, &[0xc3])?; // opcode c3 is ret
+        let no_op_function_pointer = self.allocate_read_execute_memory(1)?;
+        self.write(no_op_function_pointer, &[0xc3])?; // opcode c3 is ret in both x86 and x64
 
         debug!("run dummy thread to provoke loading of kernel32.dll");
-        self.create_thread(buffer, false, None)?;
-        thread::sleep(Duration::from_millis(100)); // TODO: replace with proper wait
+        self.create_thread(no_op_function_pointer, false, None)?
+            .join()?;
 
-        debug!("write dll path");
-        let buffer =
+        debug!("write injected dll path");
+        let injected_dll_path_pointer =
             self.allocate_read_write_memory(library_path_c_string.to_bytes_with_nul().len())?;
-        self.write(buffer, library_path_c_string.as_bytes_with_nul())?;
-
-        debug!("load dll");
-        let thread_start_routine_address =
-            self.get_export_address("kernel32.dll", "LoadLibraryA")?;
-        self.create_thread(
-            thread_start_routine_address,
-            false,
-            Some(buffer as *mut c_void),
+        self.write(
+            injected_dll_path_pointer,
+            library_path_c_string.as_bytes_with_nul(),
         )?;
-        thread::sleep(Duration::from_millis(100)); // TODO: replace with proper wait
 
-        Ok(())
+        debug!("write dll loading function");
+        let load_library_a_pointer = self.get_export_address("kernel32.dll", "LoadLibraryA")?;
+        let get_last_error_pointer = self.get_export_address("kernel32.dll", "GetLastError")?;
+        let mut load_dll_function = [
+            0x68, 0xcc, 0xcc, 0xcc, 0xcc, // push injected_dll_path_pointer
+            0xb8, 0xcc, 0xcc, 0xcc, 0xcc, // mov eax, load_library_a_pointer
+            0xff, 0xd0, // call eax
+            0x85, 0xc0, // test eax, eax
+            0xb8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0 (preserves ZF)
+            0x75, 0x07, // jne return
+            0xb8, 0xcc, 0xcc, 0xcc, 0xcc, // mov eax, get_last_error_pointer
+            0xff, 0xd0, // call eax
+            // return:
+            0xc3, // ret
+        ];
+        load_dll_function[1..5].copy_from_slice(&injected_dll_path_pointer.to_le_bytes()[..4]);
+        load_dll_function[6..10].copy_from_slice(&load_library_a_pointer.to_le_bytes()[..4]);
+        load_dll_function[22..26].copy_from_slice(&get_last_error_pointer.to_le_bytes()[..4]);
+        let load_dll_function_pointer = self.allocate_read_execute_memory(256)?;
+        self.write(load_dll_function_pointer, &load_dll_function)?;
+
+        debug!("run dll loading thread");
+        match self
+            .create_thread(load_dll_function_pointer, false, None)?
+            .join()?
+        {
+            0 => Ok(()),
+            error_code => return Err(LoadLibraryThreadError { error_code }.into()),
+        }
     }
 }
 
@@ -628,7 +658,15 @@ pub struct ExportNotFoundError;
 pub enum InjectDllError {
     LibraryPathContainsNul(#[from] LibraryPathContainsNulError),
     GetExportAddress(#[from] GetExportAddressError),
+    JoinThread(#[from] crate::thread::JoinError),
+    LoadLibraryThread(#[from] LoadLibraryThreadError),
     Os(#[from] io::Error),
+}
+
+#[derive(Debug, Error)]
+#[error("library loading thread returned with error code 0x{error_code:x}")]
+pub struct LoadLibraryThreadError {
+    error_code: u32,
 }
 
 #[derive(Debug, Error)]
