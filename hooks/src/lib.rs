@@ -9,7 +9,7 @@ use hooks::{
 use minhook::MinHook;
 use static_init::dynamic;
 use std::{collections::HashMap, error::Error, ffi::c_void};
-use windows::Process;
+use windows::process;
 
 #[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
 #[dynamic]
@@ -34,7 +34,7 @@ fn hook_function(
     function_name: &str,
     hook: *const c_void,
 ) -> Result<(), Box<dyn Error>> {
-    let process = Process::get_current();
+    let process = process::Process::get_current();
     let function_address = process.get_export_address(module_name, function_name)?;
     unsafe {
         #[allow(clippy::ptr_cast_constness)] // the pointer being mutable seems to be pointless
@@ -74,6 +74,6 @@ pub extern "stdcall" fn initialize(_: usize) {
             query_performance_counter as *const c_void,
         ),
     ] {
-        hook_function(module_name, function_name, hook).unwrap();
+        let _ = hook_function(module_name, function_name, hook);
     }
 }

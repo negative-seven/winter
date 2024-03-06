@@ -1,7 +1,6 @@
-use std::env;
-
 use anyhow::Result;
-use windows::{Process, Thread};
+use winter::Runtime;
+use std::env;
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -13,25 +12,9 @@ fn main() -> Result<()> {
     let injected_dll_path = arguments
         .next()
         .expect("missing argument: injected dll path");
-    let injected_dll_name = std::path::Path::new(&injected_dll_path)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap(); // TODO: handle errors
 
-    let process = Process::create(&executable_path, true)?;
-    process.inject_dll(&injected_dll_path)?;
-
-    let initialize_function = process.get_export_address(injected_dll_name, "initialize")?;
-    process.create_thread(initialize_function, true, None)?;
-
-    for thread in process
-        .iter_thread_ids()?
-        .map(Thread::from_id)
-        .collect::<Result<Vec<_>, _>>()?
-    {
-        thread.resume()?;
-    }
+    let runtime = Runtime::new(executable_path, injected_dll_path);
+    runtime.start()?;
 
     Ok(())
 }
