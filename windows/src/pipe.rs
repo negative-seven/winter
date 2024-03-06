@@ -1,3 +1,5 @@
+use std::io::{Read, Write};
+
 use thiserror::Error;
 use winapi::{
     ctypes::c_void,
@@ -9,7 +11,7 @@ use winapi::{
     },
 };
 
-pub fn create() -> Result<(Writer, Reader), CreateError> {
+pub fn new() -> Result<(Writer, Reader), NewError> {
     let mut read_handle = std::ptr::null_mut();
     let mut write_handle = std::ptr::null_mut();
     let security_attributes = SECURITY_ATTRIBUTES {
@@ -26,7 +28,7 @@ pub fn create() -> Result<(Writer, Reader), CreateError> {
             0,
         ) == 0
         {
-            return Err(CreateError(std::io::Error::last_os_error()));
+            return Err(NewError(std::io::Error::last_os_error()));
         }
     }
 
@@ -45,26 +47,28 @@ pub struct Writer {
     pub(crate) handle: *mut c_void,
 }
 
-impl Writer {
-    /// # Panics
-    /// Panics if `data.len()` exceeds `u32::MAX`.
-    pub fn write(&self, data: &[u8]) -> Result<(), WriteError> {
-        let mut written_bytes = 0u32;
+impl Write for Writer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut written_count = 0u32;
         unsafe {
             if WriteFile(
                 self.handle,
-                data.as_ptr().cast(),
-                data.len()
+                buf.as_ptr().cast(),
+                buf.len()
                     .try_into()
                     .expect("cannot cast data length to u32"),
-                &mut written_bytes,
+                &mut written_count,
                 NULL.cast(),
             ) == 0
             {
-                return Err(WriteError(std::io::Error::last_os_error()));
+                return Err(std::io::Error::last_os_error());
             }
         }
 
+        Ok(written_count as usize)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
 }
@@ -74,49 +78,44 @@ pub struct Reader {
     pub(crate) handle: *mut c_void,
 }
 
-impl Reader {
-    pub fn read(&self, count: u32) -> Result<Vec<u8>, ReadError> {
-        let mut buffer = vec![0u8; count as usize];
-        let mut read_bytes = 0u32;
+impl Read for Reader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut pending_count = 0;
         unsafe {
-            if ReadFile(
+            if PeekNamedPipe(
                 self.handle,
-                buffer.as_mut_ptr().cast(),
-                count,
-                &mut read_bytes,
+                NULL,
+                0,
+                NULL.cast(),
+                &mut pending_count,
                 NULL.cast(),
             ) == 0
             {
-                return Err(ReadError(std::io::Error::last_os_error()));
+                return Err(std::io::Error::last_os_error());
             }
         }
-
-        Ok(buffer)
-    }
-
-    pub fn read_pending(&self) -> Result<Vec<u8>, ReadError> {
-        let mut count = 0;
-        unsafe {
-            if PeekNamedPipe(self.handle, NULL, 0, NULL.cast(), &mut count, NULL.cast()) == 0 {
-                return Err(ReadError(std::io::Error::last_os_error()));
+        if pending_count > 0 {
+            let mut read_count = 0u32;
+            unsafe {
+                if ReadFile(
+                    self.handle,
+                    buf.as_mut_ptr().cast(),
+                    u32::min(pending_count, buf.len().try_into().unwrap()),
+                    &mut read_count,
+                    NULL.cast(),
+                ) == 0
+                {
+                    return Err(std::io::Error::last_os_error());
+                }
             }
-        }
-        if count > 0 {
-            self.read(count)
+
+            Ok(read_count as usize)
         } else {
-            Ok(Vec::new())
+            Ok(0)
         }
     }
 }
 
 #[derive(Debug, Error)]
 #[error("failed to create pipe")]
-pub struct CreateError(#[source] std::io::Error);
-
-#[derive(Debug, Error)]
-#[error("failed to write to pipe")]
-pub struct WriteError(#[source] std::io::Error);
-
-#[derive(Debug, Error)]
-#[error("failed to read from pipe")]
-pub struct ReadError(#[source] std::io::Error);
+pub struct NewError(#[source] std::io::Error);
