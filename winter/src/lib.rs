@@ -27,8 +27,9 @@ impl Runtime {
 
         let initialize_function = process.get_export_address(injected_dll_name, "initialize")?;
         process
-            .create_thread(initialize_function, true, None)
-            .map_err(RuntimeError::ThreadCreate)?;
+            .create_thread(initialize_function, false, None)
+            .map_err(RuntimeError::ThreadCreate)?
+            .join()?;
 
         for thread in process
             .iter_thread_ids()?
@@ -52,4 +53,5 @@ pub enum RuntimeError {
     IterThreadIds(#[from] process::IterThreadIdsError),
     ThreadFromId(#[from] thread::FromIdError),
     ThreadResume(#[from] thread::ResumeError),
+    ThreadJoin(#[from] thread::JoinError),
 }
