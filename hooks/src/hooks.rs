@@ -37,13 +37,6 @@ pub unsafe extern "system" fn peek_message(
 pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
     // due to pointer alignment issues, frequency must be split into two u32 chunks
 
-    let mut busy_wait_count = BUSY_WAIT_COUNT.write();
-    *busy_wait_count += 1;
-    if *busy_wait_count >= 100 {
-        *TICKS.write() += 1;
-        *busy_wait_count = 0;
-    }
-
     #[allow(clippy::cast_possible_truncation)]
     unsafe {
         *frequency = SIMULATED_PERFORMANCE_COUNTER_FREQUENCY as u32;
@@ -55,6 +48,13 @@ pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
 
 pub extern "system" fn query_performance_counter(count: *mut u32) -> u32 {
     // due to pointer alignment issues, count must be split into two u32 chunks
+
+    let mut busy_wait_count = BUSY_WAIT_COUNT.write();
+    *busy_wait_count += 1;
+    if *busy_wait_count >= 100 {
+        *TICKS.write() += 1;
+        *busy_wait_count = 0;
+    }
 
     #[allow(clippy::cast_possible_truncation)]
     unsafe {
