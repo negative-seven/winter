@@ -1,4 +1,4 @@
-use super::thread::Thread;
+use crate::{pipe, thread::Thread};
 use std::{
     ffi::{CStr, CString, NulError},
     io,
@@ -8,7 +8,7 @@ use thiserror::Error;
 use tracing::{debug, instrument, Level};
 use winapi::{
     ctypes::c_void,
-    shared::{minwindef::FALSE, ntdef::NULL},
+    shared::{minwindef::TRUE, ntdef::NULL},
     um::{
         handleapi::{CloseHandle, INVALID_HANDLE_VALUE},
         memoryapi::{ReadProcessMemory, VirtualAllocEx, WriteProcessMemory},
@@ -21,7 +21,7 @@ use winapi::{
             MODULEENTRY32, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32, TH32CS_SNAPTHREAD,
             THREADENTRY32,
         },
-        winbase::CREATE_SUSPENDED,
+        winbase::{CREATE_SUSPENDED, STARTF_USESTDHANDLES},
         winnt::{
             IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER, IMAGE_EXPORT_DIRECTORY,
             IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, MEM_COMMIT,
@@ -46,7 +46,13 @@ impl Process {
     }
 
     #[instrument(ret, err)]
-    pub fn create(executable_path: &str, suspended: bool) -> Result<Self, CreateError> {
+    pub fn create(
+        executable_path: &str,
+        suspended: bool,
+        stdin_redirect: Option<&pipe::Reader>,
+        stdout_redirect: Option<&pipe::Writer>,
+        stderr_redirect: Option<&pipe::Writer>,
+    ) -> Result<Self, CreateError> {
         let executable_path_c_string = CString::new(executable_path)?;
 
         #[allow(clippy::cast_possible_truncation)]
@@ -62,13 +68,13 @@ impl Process {
             dwXCountChars: 0,
             dwYCountChars: 0,
             dwFillAttribute: 0,
-            dwFlags: 0,
+            dwFlags: STARTF_USESTDHANDLES,
             wShowWindow: 0,
             cbReserved2: 0,
             lpReserved2: NULL.cast(),
-            hStdInput: NULL.cast(),
-            hStdOutput: NULL.cast(),
-            hStdError: NULL.cast(),
+            hStdInput: stdin_redirect.map_or_else(|| NULL.cast(), |reader| reader.handle),
+            hStdOutput: stdout_redirect.map_or_else(|| NULL.cast(), |writer| writer.handle),
+            hStdError: stderr_redirect.map_or_else(|| NULL.cast(), |writer| writer.handle),
         };
         let mut process_information = PROCESS_INFORMATION {
             hProcess: NULL.cast(),
@@ -83,7 +89,7 @@ impl Process {
                 NULL.cast(),
                 NULL.cast(),
                 NULL.cast(),
-                FALSE,
+                TRUE,
                 if suspended { CREATE_SUSPENDED } else { 0 },
                 NULL.cast(),
                 NULL.cast(),

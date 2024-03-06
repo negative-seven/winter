@@ -22,7 +22,7 @@ impl Runtime {
             .to_str()
             .unwrap(); // TODO: handle errors
 
-        let process = process::Process::create(&self.executable_path, true)?;
+        let process = process::Process::create(&self.executable_path, true, None, None, None)?;
         process.inject_dll(&self.injected_dll_path)?;
 
         let initialize_function = process.get_export_address(injected_dll_name, "initialize")?;
