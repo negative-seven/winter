@@ -45,6 +45,11 @@ impl Runtime {
         })
     }
 
+    #[must_use]
+    pub fn stdout_mut(&mut self) -> &mut Stdout {
+        &mut self.stdout
+    }
+
     pub fn resume(&self) -> Result<(), RuntimeError> {
         for thread in self
             .process
@@ -58,9 +63,9 @@ impl Runtime {
         Ok(())
     }
 
-    #[must_use]
-    pub fn stdout_mut(&mut self) -> &mut Stdout {
-        &mut self.stdout
+    pub fn wait_until_exit(&self) -> Result<(), WaitUntilExitError> {
+        self.process.join()?;
+        Ok(())
     }
 }
 
@@ -114,4 +119,10 @@ pub enum RuntimeError {
     IterThreadIds(#[from] process::IterThreadIdsError),
     ThreadFromId(#[from] thread::FromIdError),
     ThreadResume(#[from] thread::ResumeError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while waiting for the winter runtime to exit")]
+pub enum WaitUntilExitError {
+    ProcessJoinError(#[from] process::JoinError),
 }

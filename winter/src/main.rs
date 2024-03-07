@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::env;
+use std::{env, io::Read};
 use winter::Runtime;
 
 fn main() -> Result<()> {
@@ -13,8 +13,13 @@ fn main() -> Result<()> {
         .next()
         .expect("missing argument: injected dll path");
 
-    let runtime = Runtime::new(executable_path, injected_dll_path)?;
+    let mut runtime = Runtime::new(executable_path, injected_dll_path)?;
     runtime.resume()?;
+    runtime.wait_until_exit()?;
+
+    let mut stdout = String::new();
+    runtime.stdout_mut().read_to_string(&mut stdout)?;
+    println!("{stdout}");
 
     Ok(())
 }

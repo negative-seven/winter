@@ -16,12 +16,13 @@ use winapi::{
             CreateProcessA, CreateRemoteThread, GetCurrentProcess, GetProcessId,
             PROCESS_INFORMATION, STARTUPINFOA,
         },
+        synchapi::WaitForSingleObject,
         tlhelp32::{
             CreateToolhelp32Snapshot, Module32First, Module32Next, Thread32First, Thread32Next,
             MODULEENTRY32, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32, TH32CS_SNAPTHREAD,
             THREADENTRY32,
         },
-        winbase::{CREATE_SUSPENDED, STARTF_USESTDHANDLES},
+        winbase::{CREATE_SUSPENDED, INFINITE, STARTF_USESTDHANDLES, WAIT_FAILED},
         winnt::{
             IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER, IMAGE_EXPORT_DIRECTORY,
             IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, MEM_COMMIT,
@@ -109,6 +110,16 @@ impl Process {
         };
 
         Ok(process)
+    }
+
+    pub fn join(&self) -> Result<(), JoinError> {
+        unsafe {
+            if WaitForSingleObject(self.handle, INFINITE) == WAIT_FAILED {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
+
+        Ok(())
     }
 
     pub fn get_id(&self) -> Result<u32, GetIdError> {
@@ -617,6 +628,10 @@ pub enum CreateError {
     PathContainsNul(#[from] NulError),
     Os(#[from] io::Error),
 }
+
+#[derive(Debug, Error)]
+#[error("error occurred while joining process")]
+pub struct JoinError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 #[error("failed to get process id")]
