@@ -64,19 +64,22 @@ fn query_performance_counter() -> Result<()> {
     assert_eq!(counter_values.len(), 200);
     assert_eq!(frequency_values.len(), 200);
     assert!(frequency_values.iter().all(|v| *v == frequency_values[0]));
-    for (range, (numerator, denominator)) in [
-        (0..=98, (0, 60)),
-        (100..=198, (1, 60)),
-        (199..=199, (2, 60)),
-    ] {
-        for (counter_value_index, counter_value) in counter_values[range].iter().enumerate() {
+    for (index, counter_value) in counter_values.iter().enumerate() {
+        let expected_counter_value = {
+            let (numerator, denominator) = match index {
+                0..=98 => (0, 60),
+                99..=198 => (1, 60),
+                199 => (2, 60),
+                _ => panic!("index is outside expected bounds"),
+            };
+            frequency_values[0] * numerator / denominator
+        };
+
             assert_eq!(
-                *counter_value,
-                frequency_values[0] * numerator / denominator,
-                "unexpected value at index {counter_value_index}"
+            *counter_value, expected_counter_value,
+            "unexpected value at index {index}"
             );
         }
-    }
 
     Ok(())
 }
@@ -109,7 +112,11 @@ fn query_performance_counter_and_sleep() -> Result<()> {
     for (index, (counter_value, frequency_value)) in
         counter_values.iter().zip(&frequency_values).enumerate()
     {
-        assert_eq!(*counter_value, frequency_value * (index as u64) * 47 / 1000);
+        assert_eq!(
+            *counter_value,
+            frequency_value * (index as u64) * 47 / 1000,
+            "unexpected value at index {index}"
+        );
     }
 
     Ok(())
