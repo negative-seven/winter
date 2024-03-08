@@ -3,6 +3,7 @@ use std::{
     ffi::{CStr, CString, NulError},
     io,
     mem::{size_of, transmute},
+    path::Path,
 };
 use thiserror::Error;
 use tracing::{debug, instrument, Level};
@@ -55,6 +56,8 @@ impl Process {
         stderr_redirect: Option<&pipe::Writer>,
     ) -> Result<Self, CreateError> {
         let executable_path_c_string = CString::new(executable_path)?;
+        let executable_directory_path_c_string =
+            CString::new(Path::new(executable_path).parent().unwrap().to_str().unwrap()).unwrap();
 
         #[allow(clippy::cast_possible_truncation)]
         let mut startup_info = STARTUPINFOA {
@@ -93,7 +96,7 @@ impl Process {
                 TRUE,
                 if suspended { CREATE_SUSPENDED } else { 0 },
                 NULL.cast(),
-                NULL.cast(),
+                executable_directory_path_c_string.as_ptr().cast(),
                 &mut startup_info,
                 &mut process_information,
             ) == 0
