@@ -56,8 +56,14 @@ impl Process {
         stderr_redirect: Option<&pipe::Writer>,
     ) -> Result<Self, CreateError> {
         let executable_path_c_string = CString::new(executable_path)?;
-        let executable_directory_path_c_string =
-            CString::new(Path::new(executable_path).parent().unwrap().to_str().unwrap()).unwrap();
+        let executable_directory_path_c_string = CString::new(
+            Path::new(executable_path)
+                .parent()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+        )
+        .unwrap();
 
         #[allow(clippy::cast_possible_truncation)]
         let mut startup_info = STARTUPINFOA {

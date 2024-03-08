@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::{io::Read, process::Command, sync::Once};
+use std::{io::Read, path::Path, process::Command, sync::Once};
 
 #[allow(clippy::missing_panics_doc)]
 pub fn init_test() {
@@ -8,6 +8,13 @@ pub fn init_test() {
         tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .init();
+
+        assert!(
+            std::env::var("VCVARS_DIR").map_or(false, |vcvars_dir| Path::exists(
+                &Path::new(&vcvars_dir).join("vcvars32.bat")
+            )),
+            "the environment variable VCVARS_DIR must be set to a directory containing vcvars scripts"
+        );
 
         assert!(Command::new("tests/programs/build.bat")
             .spawn()
