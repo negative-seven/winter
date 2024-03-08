@@ -80,3 +80,37 @@ fn query_performance_counter() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn query_performance_counter_and_sleep() -> Result<()> {
+    init_test();
+
+    let mut runtime = winter::Runtime::new(
+        "tests/programs/bin/query_performance_counter_and_sleep.exe",
+        "hooks32.dll",
+    )?;
+    runtime.resume()?;
+    runtime.wait_until_exit()?;
+    let mut stdout = String::new();
+    runtime.stdout_mut().read_to_string(&mut stdout)?;
+
+    let mut counter_values = Vec::new();
+    let mut frequency_values = Vec::new();
+    for line in stdout.lines() {
+        let (counter_value_str, frequency_value_str) =
+            line.split_once('/').expect("could not split output by '/'");
+        counter_values.push(str::parse::<u64>(counter_value_str)?);
+        frequency_values.push(str::parse::<u64>(frequency_value_str)?);
+    }
+
+    assert_eq!(counter_values.len(), 10);
+    assert_eq!(frequency_values.len(), 10);
+    assert!(frequency_values.iter().all(|v| *v == frequency_values[0]));
+    for (index, (counter_value, frequency_value)) in
+        counter_values.iter().zip(&frequency_values).enumerate()
+    {
+        assert_eq!(*counter_value, frequency_value * (index as u64) * 47 / 1000);
+    }
+
+    Ok(())
+}

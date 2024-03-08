@@ -4,7 +4,7 @@ mod hooks;
 
 use hooks::{
     get_async_key_state, get_key_state, get_keyboard_state, peek_message,
-    query_performance_counter, query_performance_frequency,
+    query_performance_counter, query_performance_frequency, sleep,
 };
 use minhook::MinHook;
 use static_init::dynamic;
@@ -24,6 +24,8 @@ const SIMULATED_PERFORMANCE_COUNTER_FREQUENCY: u64 = 1 << 32;
 #[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
 #[dynamic]
 static mut TICKS: u64 = 0;
+
+const TICKS_PER_SECOND: u64 = 3000;
 
 #[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
 #[dynamic]
@@ -62,6 +64,7 @@ pub extern "stdcall" fn initialize(_: usize) {
             "GetAsyncKeyState",
             get_async_key_state as *const c_void,
         ),
+        ("kernel32.dll", "Sleep", sleep as *const c_void),
         ("user32.dll", "PeekMessageA", peek_message as *const c_void),
         (
             "kernel32.dll",
