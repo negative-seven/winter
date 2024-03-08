@@ -1,4 +1,7 @@
-use crate::{get_trampoline, BUSY_WAIT_COUNT, SIMULATED_PERFORMANCE_COUNTER_FREQUENCY, TICKS, TICKS_PER_SECOND};
+use crate::{
+    get_trampoline, BUSY_WAIT_COUNT, SIMULATED_PERFORMANCE_COUNTER_FREQUENCY, TICKS,
+    TICKS_PER_SECOND,
+};
 use winapi::um::winuser::{MSG, WM_CHAR, WM_KEYDOWN, WM_KEYUP};
 
 pub extern "system" fn get_keyboard_state(key_states: *mut bool) {
@@ -21,8 +24,7 @@ pub extern "system" fn sleep(milliseconds: u32) {
     *TICKS.write() += u64::from(milliseconds) * TICKS_PER_SECOND / 1000;
 
     unsafe {
-        let trampoline: extern "system" fn(u32) =
-            std::mem::transmute(get_trampoline("Sleep"));
+        let trampoline: extern "system" fn(u32) = std::mem::transmute(get_trampoline("Sleep"));
         trampoline(milliseconds);
     }
 }
@@ -37,7 +39,7 @@ pub extern "system" fn peek_message(
     unsafe {
         let trampoline: extern "system" fn(*mut MSG, u32, u32, u32, u32) -> u32 =
             std::mem::transmute(get_trampoline("PeekMessageA"));
-    
+
         let result = trampoline(message_pointer, arg1, arg2, arg3, arg4);
         if result != 0 && matches!((*message_pointer).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
             (*message_pointer).message = 0;
@@ -54,8 +56,12 @@ pub extern "system" fn get_tick_count() -> u32 {
         *TICKS.write() += TICKS_PER_SECOND / 60;
         *busy_wait_count = 0;
     }
-    
+
     (*TICKS.read() * 1000 / TICKS_PER_SECOND) as u32
+}
+
+pub extern "system" fn time_get_time() -> u32 {
+    get_tick_count()
 }
 
 pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {

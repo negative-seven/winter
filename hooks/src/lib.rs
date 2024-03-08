@@ -3,7 +3,8 @@
 mod hooks;
 
 use hooks::{
-    get_async_key_state, get_key_state, get_keyboard_state, get_tick_count, peek_message, query_performance_counter, query_performance_frequency, sleep
+    get_async_key_state, get_key_state, get_keyboard_state, get_tick_count, peek_message,
+    query_performance_counter, query_performance_frequency, sleep, time_get_time,
 };
 use minhook::MinHook;
 use static_init::dynamic;
@@ -65,7 +66,12 @@ pub extern "stdcall" fn initialize(_: usize) {
         ),
         ("kernel32.dll", "Sleep", sleep as *const c_void),
         ("user32.dll", "PeekMessageA", peek_message as *const c_void),
-        ("kernel32.dll", "GetTickCount", get_tick_count as *const c_void),
+        (
+            "kernel32.dll",
+            "GetTickCount",
+            get_tick_count as *const c_void,
+        ),
+        ("winmm.dll", "timeGetTime", time_get_time as *const c_void),
         (
             "kernel32.dll",
             "QueryPerformanceFrequency",
