@@ -46,6 +46,18 @@ pub extern "system" fn peek_message(
     }
 }
 
+#[allow(clippy::cast_possible_truncation)]
+pub extern "system" fn get_tick_count() -> u32 {
+    let mut busy_wait_count = BUSY_WAIT_COUNT.write();
+    *busy_wait_count += 1;
+    if *busy_wait_count >= 100 {
+        *TICKS.write() += TICKS_PER_SECOND / 60;
+        *busy_wait_count = 0;
+    }
+    
+    (*TICKS.read() * 1000 / TICKS_PER_SECOND) as u32
+}
+
 pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
     // due to pointer alignment issues, frequency must be split into two u32 chunks
 
