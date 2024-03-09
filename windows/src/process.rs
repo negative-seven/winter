@@ -9,7 +9,7 @@ use thiserror::Error;
 use tracing::{debug, instrument, Level};
 use winapi::{
     ctypes::c_void,
-    shared::{minwindef::TRUE, ntdef::NULL},
+    shared::{minwindef::TRUE, ntdef::NULL, winerror::ERROR_BAD_LENGTH},
     um::{
         handleapi::{CloseHandle, INVALID_HANDLE_VALUE},
         memoryapi::{ReadProcessMemory, VirtualAllocEx, WriteProcessMemory},
@@ -575,12 +575,24 @@ struct ModuleEntry32Iterator {
 impl ModuleEntry32Iterator {
     #[instrument(ret(level = Level::DEBUG), err)]
     pub(in crate::process) fn new(process_id: u32) -> Result<Self, NewModuleEntry32IteratorError> {
-        let snapshot_handle = unsafe {
-            CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id)
-        };
+        let mut snapshot_handle;
+        loop {
+            snapshot_handle = unsafe {
+                CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id)
+            };
+            if snapshot_handle != INVALID_HANDLE_VALUE {
+                break;
+            }
 
-        if snapshot_handle == INVALID_HANDLE_VALUE {
-            return Err(io::Error::last_os_error().into());
+            // retry on ERROR_BAD_LENGTH (see: https://learn.microsoft.com/en-us/windows/win32/api/TlHelp32/nf-tlhelp32-createtoolhelp32snapshot)
+            let error = io::Error::last_os_error();
+            #[allow(clippy::cast_sign_loss)]
+            if !error
+                .raw_os_error()
+                .is_some_and(|code| code as u32 == ERROR_BAD_LENGTH)
+            {
+                return Err(error.into());
+            }
         }
 
         Ok(ModuleEntry32Iterator {
