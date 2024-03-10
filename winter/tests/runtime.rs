@@ -1,5 +1,9 @@
 use anyhow::Result;
-use std::{io::Read, path::Path, process::Command, sync::Once};
+use std::{
+    path::Path,
+    process::Command,
+    sync::{Arc, Mutex, Once},
+};
 
 #[allow(clippy::missing_panics_doc)]
 pub fn init_test() {
@@ -25,36 +29,33 @@ pub fn init_test() {
     });
 }
 
+fn run_and_get_stdout(executable_path: &str) -> Result<Vec<u8>> {
+    let stdout = Arc::new(Mutex::new(Vec::new()));
+    let stdout_callback = {
+        let stdout = Arc::clone(&stdout);
+        move |bytes: &_| {
+            stdout.lock().unwrap().extend_from_slice(bytes);
+        }
+    };
+    let mut runtime = winter::Runtime::new(executable_path, "hooks32.dll", Some(stdout_callback))?;
+    runtime.resume()?;
+    runtime.wait_until_exit()?;
+    Ok(Arc::try_unwrap(stdout).unwrap().into_inner().unwrap())
+}
+
 #[test]
 fn stdout() -> Result<()> {
     init_test();
-
-    let mut runtime = winter::Runtime::new("tests/programs/bin/stdout.exe", "hooks32.dll")?;
-    runtime.resume()?;
-    runtime.wait_until_exit()?;
-    let mut stdout = Vec::new();
-    runtime.stdout_mut().read_to_end(&mut stdout)?;
-
-    assert_eq!(
-        stdout,
-        "abcABC123!\"_"
-            .bytes()
-            .chain([0x99, 0xaa, 0xbb])
-            .collect::<Vec<u8>>()
-    );
-
+    let stdout = run_and_get_stdout("tests/programs/bin/stdout.exe")?;
+    assert_eq!(stdout, b"abcABC123!\"_\x99\xaa\xbb");
     Ok(())
 }
 
 #[test]
 fn get_tick_count() -> Result<()> {
     init_test();
-
-    let mut runtime = winter::Runtime::new("tests/programs/bin/get_tick_count.exe", "hooks32.dll")?;
-    runtime.resume()?;
-    runtime.wait_until_exit()?;
-    let mut stdout = String::new();
-    runtime.stdout_mut().read_to_string(&mut stdout)?;
+    let stdout = run_and_get_stdout("tests/programs/bin/get_tick_count.exe")?;
+    let stdout = String::from_utf8_lossy(&stdout);
 
     let tick_values = stdout
         .lines()
@@ -81,15 +82,8 @@ fn get_tick_count() -> Result<()> {
 #[test]
 fn get_tick_count_and_sleep() -> Result<()> {
     init_test();
-
-    let mut runtime = winter::Runtime::new(
-        "tests/programs/bin/get_tick_count_and_sleep.exe",
-        "hooks32.dll",
-    )?;
-    runtime.resume()?;
-    runtime.wait_until_exit()?;
-    let mut stdout = String::new();
-    runtime.stdout_mut().read_to_string(&mut stdout)?;
+    let stdout = run_and_get_stdout("tests/programs/bin/get_tick_count_and_sleep.exe")?;
+    let stdout = String::from_utf8_lossy(&stdout);
 
     let tick_values = stdout
         .lines()
@@ -112,12 +106,8 @@ fn get_tick_count_and_sleep() -> Result<()> {
 #[test]
 fn time_get_time() -> Result<()> {
     init_test();
-
-    let mut runtime = winter::Runtime::new("tests/programs/bin/time_get_time.exe", "hooks32.dll")?;
-    runtime.resume()?;
-    runtime.wait_until_exit()?;
-    let mut stdout = String::new();
-    runtime.stdout_mut().read_to_string(&mut stdout)?;
+    let stdout = run_and_get_stdout("tests/programs/bin/time_get_time.exe")?;
+    let stdout = String::from_utf8_lossy(&stdout);
 
     let tick_values = stdout
         .lines()
@@ -144,15 +134,8 @@ fn time_get_time() -> Result<()> {
 #[test]
 fn time_get_time_and_sleep() -> Result<()> {
     init_test();
-
-    let mut runtime = winter::Runtime::new(
-        "tests/programs/bin/time_get_time_and_sleep.exe",
-        "hooks32.dll",
-    )?;
-    runtime.resume()?;
-    runtime.wait_until_exit()?;
-    let mut stdout = String::new();
-    runtime.stdout_mut().read_to_string(&mut stdout)?;
+    let stdout = run_and_get_stdout("tests/programs/bin/time_get_time_and_sleep.exe")?;
+    let stdout = String::from_utf8_lossy(&stdout);
 
     let tick_values = stdout
         .lines()
@@ -175,15 +158,8 @@ fn time_get_time_and_sleep() -> Result<()> {
 #[test]
 fn query_performance_counter() -> Result<()> {
     init_test();
-
-    let mut runtime = winter::Runtime::new(
-        "tests/programs/bin/query_performance_counter.exe",
-        "hooks32.dll",
-    )?;
-    runtime.resume()?;
-    runtime.wait_until_exit()?;
-    let mut stdout = String::new();
-    runtime.stdout_mut().read_to_string(&mut stdout)?;
+    let stdout = run_and_get_stdout("tests/programs/bin/query_performance_counter.exe")?;
+    let stdout = String::from_utf8_lossy(&stdout);
 
     let mut counter_values = Vec::new();
     let mut frequency_values = Vec::new();
@@ -219,15 +195,8 @@ fn query_performance_counter() -> Result<()> {
 #[test]
 fn query_performance_counter_and_sleep() -> Result<()> {
     init_test();
-
-    let mut runtime = winter::Runtime::new(
-        "tests/programs/bin/query_performance_counter_and_sleep.exe",
-        "hooks32.dll",
-    )?;
-    runtime.resume()?;
-    runtime.wait_until_exit()?;
-    let mut stdout = String::new();
-    runtime.stdout_mut().read_to_string(&mut stdout)?;
+    let stdout = run_and_get_stdout("tests/programs/bin/query_performance_counter_and_sleep.exe")?;
+    let stdout = String::from_utf8_lossy(&stdout);
 
     let mut counter_values = Vec::new();
     let mut frequency_values = Vec::new();

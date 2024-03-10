@@ -454,6 +454,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "thiserror",
+ "tracing",
  "tracing-subscriber",
  "windows",
 ]

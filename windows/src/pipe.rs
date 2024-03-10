@@ -73,6 +73,8 @@ impl Write for Writer {
     }
 }
 
+unsafe impl Send for Writer {}
+
 #[derive(Debug)]
 pub struct Reader {
     pub(crate) handle: *mut c_void,
@@ -115,6 +117,8 @@ impl Read for Reader {
         }
     }
 }
+
+unsafe impl Send for Reader {}
 
 #[derive(Debug, Error)]
 #[error("failed to create pipe")]
