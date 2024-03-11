@@ -43,12 +43,17 @@ pub fn new() -> Result<(Writer, Reader), NewError> {
 
 #[derive(Debug)]
 pub struct Writer {
-    pub(crate) handle: *mut c_void,
+    handle: *mut c_void,
 }
 
 impl Writer {
     pub unsafe fn new(handle: *mut c_void) -> Self {
         Self { handle }
+    }
+
+    #[must_use]
+    pub unsafe fn handle(&self) -> *mut c_void {
+        self.handle
     }
 }
 
@@ -82,12 +87,17 @@ unsafe impl Send for Writer {}
 
 #[derive(Debug)]
 pub struct Reader {
-    pub(crate) handle: *mut c_void,
+    handle: *mut c_void,
 }
 
 impl Reader {
     pub unsafe fn new(handle: *mut c_void) -> Self {
         Self { handle }
+    }
+
+    #[must_use]
+    pub unsafe fn handle(&self) -> *mut c_void {
+        self.handle
     }
 }
 

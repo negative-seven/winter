@@ -82,9 +82,12 @@ impl Process {
             wShowWindow: 0,
             cbReserved2: 0,
             lpReserved2: NULL.cast(),
-            hStdInput: stdin_redirect.map_or_else(|| NULL.cast(), |reader| reader.handle),
-            hStdOutput: stdout_redirect.map_or_else(|| NULL.cast(), |writer| writer.handle),
-            hStdError: stderr_redirect.map_or_else(|| NULL.cast(), |writer| writer.handle),
+            hStdInput: stdin_redirect
+                .map_or_else(|| NULL.cast(), |reader| unsafe { reader.handle() }),
+            hStdOutput: stdout_redirect
+                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.handle() }),
+            hStdError: stderr_redirect
+                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.handle() }),
         };
         let mut process_information = PROCESS_INFORMATION {
             hProcess: NULL.cast(),

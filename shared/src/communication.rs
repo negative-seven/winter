@@ -68,8 +68,10 @@ impl HooksTransceiver {
     #[must_use]
     pub fn to_bytes(&self) -> [u8; 8] {
         let mut bytes: [u8; 8] = Default::default();
-        bytes[0..4].copy_from_slice(&(self.writer.handle as u32).to_ne_bytes());
-        bytes[4..8].copy_from_slice(&(self.reader.handle as u32).to_ne_bytes());
+        unsafe {
+            bytes[0..4].copy_from_slice(&(self.writer.handle() as u32).to_ne_bytes());
+            bytes[4..8].copy_from_slice(&(self.reader.handle() as u32).to_ne_bytes());
+        }
         bytes
     }
 }
