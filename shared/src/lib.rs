@@ -2,6 +2,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 pub mod communication;
+pub mod event;
 pub mod pipe;
 pub mod process;
 pub mod thread;

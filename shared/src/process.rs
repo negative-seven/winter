@@ -124,6 +124,11 @@ impl Process {
         Ok(process)
     }
 
+    #[must_use]
+    pub unsafe fn handle(&self) -> *mut c_void {
+        self.handle
+    }
+
     pub fn join(&self) -> Result<(), JoinError> {
         unsafe {
             if WaitForSingleObject(self.handle, INFINITE) == WAIT_FAILED {

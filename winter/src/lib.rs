@@ -13,7 +13,6 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use tracing::{error, warn};
 
 pub struct Runtime {
     process: process::Process,
@@ -90,13 +89,9 @@ impl Runtime {
             )
             .map_err(NewError::ThreadCreate)?;
 
-        loop {
-            match transceiver.receive()? {
-                Some(HooksMessage::HooksInitialized) => break,
-                Some(message) => warn!("unexpected message: {message:?}"),
-                None => (),
-            }
-            std::thread::sleep(Duration::from_millis(1));
+        match transceiver.receive_blocking()? {
+            HooksMessage::HooksInitialized => (),
+            message => return Err(UnexpectedMessageError::new(message).into()),
         }
 
         Ok(Self {
@@ -143,7 +138,21 @@ pub enum NewError {
     ProcessWrite(#[source] std::io::Error),
     GetExportAddress(#[from] process::GetExportAddressError),
     ThreadCreate(#[source] std::io::Error),
-    TransceiverRead(#[from] communication::ReadError),
+    TransceiverRead(#[from] communication::ReceiveError),
+    UnexpectedMessage(#[from] UnexpectedMessageError),
+}
+
+#[derive(Debug, Error)]
+#[error("unexpected message received: {message:?}")]
+pub struct UnexpectedMessageError {
+    message: HooksMessage,
+}
+
+impl UnexpectedMessageError {
+    #[must_use]
+    pub fn new(message: HooksMessage) -> Self {
+        Self { message }
+    }
 }
 
 #[derive(Debug, Error)]

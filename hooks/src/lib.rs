@@ -57,7 +57,7 @@ fn hook_function(
 pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
     let mut transceiver = HooksTransceiver::from_bytes(
         process::Process::get_current()
-            .read_to_vec(serialized_transceiver_pointer, 8)
+            .read_to_vec(serialized_transceiver_pointer, 16)
             .unwrap()
             .try_into()
             .unwrap(),

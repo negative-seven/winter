@@ -1,4 +1,7 @@
-use crate::pipe;
+use crate::{
+    event::{self, ManualResetEvent},
+    pipe,
+};
 use protocol::{Parcel, Protocol};
 use std::io::{self, Read, Write};
 use thiserror::Error;
@@ -8,23 +11,25 @@ use tracing::{debug, error, instrument};
 pub struct RuntimeTransceiver {
     writer: pipe::Writer,
     reader: pipe::Reader,
+    writer_event: ManualResetEvent,
+    reader_event: ManualResetEvent,
 }
 
 impl RuntimeTransceiver {
-    #[must_use]
-    pub fn new(writer: pipe::Writer, reader: pipe::Reader) -> Self {
-        Self { writer, reader }
-    }
-
     #[instrument]
-    pub fn send(&mut self, message: &RuntimeMessage) -> Result<(), WriteError> {
+    pub fn send(&mut self, message: &RuntimeMessage) -> Result<(), SendError> {
         debug!("sending runtime message");
-        transceiver_send(&mut self.writer, message)
+        transceiver_send(&mut self.writer, &mut self.writer_event, message)
     }
 
     #[instrument]
-    pub fn receive(&mut self) -> Result<Option<HooksMessage>, ReadError> {
-        transceiver_receive(&mut self.reader)
+    pub fn receive(&mut self) -> Result<Option<HooksMessage>, ReceiveError> {
+        transceiver_receive(&mut self.reader, &mut self.reader_event)
+    }
+
+    #[instrument]
+    pub fn receive_blocking(&mut self) -> Result<HooksMessage, ReceiveError> {
+        transceiver_receive_blocking(&mut self.reader, &mut self.reader_event)
     }
 }
 
@@ -32,111 +37,137 @@ impl RuntimeTransceiver {
 pub struct HooksTransceiver {
     writer: pipe::Writer,
     reader: pipe::Reader,
+    writer_event: ManualResetEvent,
+    reader_event: ManualResetEvent,
 }
 
 impl HooksTransceiver {
-    #[must_use]
-    pub fn new(writer: pipe::Writer, reader: pipe::Reader) -> Self {
-        Self { writer, reader }
-    }
+    const SIZE_IN_BYTES: usize = 16;
 
     #[instrument]
-    pub fn send(&mut self, message: &HooksMessage) -> Result<(), WriteError> {
+    pub fn send(&mut self, message: &HooksMessage) -> Result<(), SendError> {
         debug!("sending hooks message");
-        transceiver_send(&mut self.writer, message)
+        transceiver_send(&mut self.writer, &mut self.writer_event, message)
     }
 
     #[instrument]
-    pub fn receive(&mut self) -> Result<Option<RuntimeMessage>, ReadError> {
-        transceiver_receive(&mut self.reader)
+    pub fn receive(&mut self) -> Result<Option<RuntimeMessage>, ReceiveError> {
+        transceiver_receive(&mut self.reader, &mut self.reader_event)
+    }
+
+    #[instrument]
+    pub fn receive_blocking(&mut self) -> Result<RuntimeMessage, ReceiveError> {
+        transceiver_receive_blocking(&mut self.reader, &mut self.reader_event)
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
-    pub fn from_bytes(bytes: [u8; 8]) -> Self {
+    pub fn from_bytes(bytes: [u8; Self::SIZE_IN_BYTES]) -> Self {
         let writer_handle = u32::from_ne_bytes(bytes[0..4].try_into().unwrap());
         let reader_handle = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
+        let writer_event_handle = u32::from_ne_bytes(bytes[8..12].try_into().unwrap());
+        let reader_event_handle = u32::from_ne_bytes(bytes[12..16].try_into().unwrap());
 
         unsafe {
-            Self::new(
-                pipe::Writer::new(writer_handle as _),
-                pipe::Reader::new(reader_handle as _),
-            )
+            Self {
+                writer: pipe::Writer::new(writer_handle as _),
+                reader: pipe::Reader::new(reader_handle as _),
+                writer_event: ManualResetEvent::from_handle(writer_event_handle as _),
+                reader_event: ManualResetEvent::from_handle(reader_event_handle as _),
+            }
         }
     }
 
     #[must_use]
-    pub fn to_bytes(&self) -> [u8; 8] {
-        let mut bytes: [u8; 8] = Default::default();
+    #[allow(clippy::missing_panics_doc)]
+    pub fn to_bytes(&self) -> [u8; Self::SIZE_IN_BYTES] {
         unsafe {
-            bytes[0..4].copy_from_slice(&(self.writer.handle() as u32).to_ne_bytes());
-            bytes[4..8].copy_from_slice(&(self.reader.handle() as u32).to_ne_bytes());
+            [
+                self.writer.handle() as u32,
+                self.reader.handle() as u32,
+                self.writer_event.handle() as u32,
+                self.reader_event.handle() as u32,
+            ]
+            .iter()
+            .flat_map(|h| h.to_ne_bytes())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
         }
-        bytes
     }
 }
 
-fn transceiver_send<W: Write, M: Parcel>(write: &mut W, message: &M) -> Result<(), WriteError> {
-    let bytes = message
-        .raw_bytes(&protocol::Settings::default())
-        .map_err(|_| WriteError::Protocol)?;
+fn transceiver_send<W: Write, M: Parcel>(
+    write: &mut W,
+    event: &mut ManualResetEvent,
+    message: &M,
+) -> Result<(), SendError> {
     #[allow(clippy::cast_possible_truncation)]
-    write.write_all(&(bytes.len() as u32).to_ne_bytes())?;
-    write.write_all(&bytes)?;
+    write.write_all(
+        &message
+            .raw_bytes(&protocol::Settings::default())
+            .map_err(|_| SendError::Protocol)?,
+    )?;
+    write.flush()?;
+    event.set()?;
     Ok(())
 }
 
-fn transceiver_receive<R: Read, M: Parcel>(read: &mut R) -> Result<Option<M>, ReadError> {
-    let size = {
-        let mut bytes = [0; std::mem::size_of::<u32>()];
-        if !read_exact_or_nothing(read, &mut bytes)? {
-            return Ok(None);
-        }
-        u32::from_ne_bytes(bytes) as usize
-    };
-    let mut bytes = vec![0; size];
-    if !read_exact_or_nothing(read, &mut bytes)? {
+fn transceiver_receive<R: Read, M: Parcel>(
+    read: &mut R,
+    event: &mut ManualResetEvent,
+) -> Result<Option<M>, ReceiveError> {
+    if !event.get()? {
         return Ok(None);
     }
+    event.reset()?;
+    let mut bytes = Vec::new();
+    read.read_to_end(&mut bytes)?;
     M::from_raw_bytes(&bytes, &protocol::Settings::default())
         .map(Some)
-        .map_err(|_| ReadError::Protocol)
+        .map_err(|_| ReceiveError::Protocol)
 }
 
-fn read_exact_or_nothing<R: Read>(read: &mut R, bytes: &mut [u8]) -> Result<bool, io::Error> {
-    let mut count = 0;
-    loop {
-        let partial_count = read.read(&mut bytes[count..])?;
-        if partial_count == 0 {
-            break;
-        }
-        count += partial_count;
-    }
-    if count == 0 {
-        Ok(false)
-    } else if count < bytes.len() {
-        Err(io::Error::from(io::ErrorKind::UnexpectedEof))
-    } else if count == bytes.len() {
-        Ok(true)
-    } else {
-        unreachable!();
-    }
+fn transceiver_receive_blocking<R: Read, M: Parcel>(
+    read: &mut R,
+    event: &mut ManualResetEvent,
+) -> Result<M, ReceiveError> {
+    event.wait()?;
+    event.reset()?;
+    let mut bytes = Vec::new();
+    read.read_to_end(&mut bytes)?;
+    M::from_raw_bytes(&bytes, &protocol::Settings::default()).map_err(|_| ReceiveError::Protocol)
 }
 
 pub fn new_transceiver_pair(
 ) -> Result<(RuntimeTransceiver, HooksTransceiver), NewTransceiverPairError> {
     let (pipe_0_writer, pipe_0_reader) = pipe::new()?;
     let (pipe_1_writer, pipe_1_reader) = pipe::new()?;
-
+    let pipe_0_event = ManualResetEvent::new()?;
+    let pipe_1_event = ManualResetEvent::new()?;
     Ok((
-        RuntimeTransceiver::new(pipe_0_writer, pipe_1_reader),
-        HooksTransceiver::new(pipe_1_writer, pipe_0_reader),
+        RuntimeTransceiver {
+            writer: pipe_0_writer,
+            reader: pipe_1_reader,
+            writer_event: pipe_0_event.try_clone()?,
+            reader_event: pipe_1_event.try_clone()?,
+        },
+        HooksTransceiver {
+            writer: pipe_1_writer,
+            reader: pipe_0_reader,
+            writer_event: pipe_1_event,
+            reader_event: pipe_0_event,
+        },
     ))
 }
 
 #[derive(Debug, Error)]
 #[error("failed to create transceiver pair")]
-pub struct NewTransceiverPairError(#[from] pipe::NewError);
+pub enum NewTransceiverPairError {
+    NewPipe(#[from] pipe::NewError),
+    NewEvent(#[from] event::NewError),
+    CloneEvent(#[from] event::CloneError),
+}
 
 #[derive(Debug, Protocol)]
 #[protocol(discriminant = "integer")]
@@ -153,16 +184,19 @@ pub enum HooksMessage {
 
 // protocol::Error isn't stored inside as it does not implement Sync
 #[derive(Debug, Error)]
-#[error("error during transceiver write")]
-pub enum WriteError {
-    Protocol,
+#[error("error during transceiver send")]
+pub enum SendError {
+    EventSet(#[from] event::SetError),
     Io(#[from] io::Error),
+    Protocol,
 }
 
 // protocol::Error isn't stored inside as it does not implement Sync
 #[derive(Debug, Error)]
-#[error("error during transceiver read")]
-pub enum ReadError {
-    Protocol,
+#[error("error during transceiver receive")]
+pub enum ReceiveError {
+    EventGet(#[from] event::GetError),
+    EventReset(#[from] event::ResetError),
     Io(#[from] io::Error),
+    Protocol,
 }
