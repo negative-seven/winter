@@ -66,12 +66,12 @@ impl Runtime {
             executable_path.as_ref(),
             true,
             None,
-            Some(&stdout_pipe_writer),
+            Some(stdout_pipe_writer),
             None,
         )?;
         subprocess.inject_dll(injected_dll_path.as_ref())?;
 
-        let serialized_hooks_transceiver = hooks_transceiver.to_bytes();
+        let serialized_hooks_transceiver = unsafe { hooks_transceiver.leak_to_bytes() };
         let serialized_hooks_transceiver_pointer = subprocess
             .allocate_read_write_memory(serialized_hooks_transceiver.len())
             .map_err(NewError::ProcessAllocate)?;

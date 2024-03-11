@@ -1,11 +1,10 @@
+use crate::handle::Handle;
 use std::io;
 use thiserror::Error;
 use tracing::{debug, instrument, Level};
 use winapi::{
-    ctypes::c_void,
     shared::minwindef::FALSE,
     um::{
-        handleapi::CloseHandle,
         processthreadsapi::{GetExitCodeThread, GetThreadId, OpenThread, ResumeThread},
         synchapi::WaitForSingleObject,
         winbase::{INFINITE, WAIT_FAILED},
@@ -15,7 +14,7 @@ use winapi::{
 
 #[derive(Debug)]
 pub struct Thread {
-    handle: *mut c_void,
+    handle: Handle,
 }
 
 impl Thread {
@@ -26,17 +25,17 @@ impl Thread {
             return Err(FromIdError(io::Error::last_os_error()));
         }
 
-        unsafe { Ok(Self::from_handle(handle)) }
+        unsafe { Ok(Self::from_handle(Handle::from_raw(handle))) }
     }
 
     #[instrument(ret(level = Level::DEBUG))]
-    pub unsafe fn from_handle(handle: *mut c_void) -> Self {
+    pub unsafe fn from_handle(handle: Handle) -> Self {
         Self { handle }
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]
     pub fn get_id(&self) -> Result<u32, io::Error> {
-        let id = unsafe { GetThreadId(self.handle) };
+        let id = unsafe { GetThreadId(self.handle.as_raw()) };
 
         if id == 0 {
             return Err(io::Error::last_os_error());
@@ -47,7 +46,7 @@ impl Thread {
 
     #[instrument(err)]
     pub fn resume(&self) -> Result<(), ResumeError> {
-        if unsafe { ResumeThread(self.handle) } == 0xffff_ffff {
+        if unsafe { ResumeThread(self.handle.as_raw()) } == 0xffff_ffff {
             return Err(io::Error::last_os_error().into());
         }
 
@@ -58,23 +57,17 @@ impl Thread {
     #[instrument(err)]
     pub fn join(&self) -> Result<u32, JoinError> {
         unsafe {
-            if WaitForSingleObject(self.handle, INFINITE) == WAIT_FAILED {
+            if WaitForSingleObject(self.handle.as_raw(), INFINITE) == WAIT_FAILED {
                 return Err(io::Error::last_os_error().into());
             }
 
             let mut exit_code = 0u32;
-            if GetExitCodeThread(self.handle, &mut exit_code) == 0 {
+            if GetExitCodeThread(self.handle.as_raw(), &mut exit_code) == 0 {
                 return Err(io::Error::last_os_error().into());
             }
 
             Ok(exit_code)
         }
-    }
-}
-
-impl Drop for Thread {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.handle) };
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{pipe, thread::Thread};
+use crate::{handle::Handle, pipe, thread::Thread};
 use std::{
     ffi::{CStr, CString, NulError},
     io,
@@ -11,7 +11,7 @@ use winapi::{
     ctypes::c_void,
     shared::{minwindef::TRUE, ntdef::NULL, winerror::ERROR_BAD_LENGTH},
     um::{
-        handleapi::{CloseHandle, INVALID_HANDLE_VALUE},
+        handleapi::INVALID_HANDLE_VALUE,
         memoryapi::{ReadProcessMemory, VirtualAllocEx, WriteProcessMemory},
         processthreadsapi::{
             CreateProcessA, CreateRemoteThread, GetCurrentProcess, GetProcessId,
@@ -34,16 +34,14 @@ use winapi::{
 
 #[derive(Debug)]
 pub struct Process {
-    handle: *mut c_void,
-    is_pseudo_handle: bool,
+    handle: Handle,
 }
 
 impl Process {
     #[must_use]
     pub fn get_current() -> Self {
         Self {
-            handle: unsafe { GetCurrentProcess() },
-            is_pseudo_handle: true,
+            handle: unsafe { Handle::from_raw(GetCurrentProcess()) },
         }
     }
 
@@ -51,9 +49,9 @@ impl Process {
     pub fn create(
         executable_path: &str,
         suspended: bool,
-        stdin_redirect: Option<&pipe::Reader>,
-        stdout_redirect: Option<&pipe::Writer>,
-        stderr_redirect: Option<&pipe::Writer>,
+        stdin_redirect: Option<pipe::Reader>,
+        stdout_redirect: Option<pipe::Writer>,
+        stderr_redirect: Option<pipe::Writer>,
     ) -> Result<Self, CreateError> {
         let executable_path_c_string = CString::new(executable_path)?;
         let executable_directory_path_c_string = CString::new(
@@ -83,11 +81,11 @@ impl Process {
             cbReserved2: 0,
             lpReserved2: NULL.cast(),
             hStdInput: stdin_redirect
-                .map_or_else(|| NULL.cast(), |reader| unsafe { reader.handle() }),
+                .map_or_else(|| NULL.cast(), |reader| unsafe { reader.leak() }),
             hStdOutput: stdout_redirect
-                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.handle() }),
+                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.leak() }),
             hStdError: stderr_redirect
-                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.handle() }),
+                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.leak() }),
         };
         let mut process_information = PROCESS_INFORMATION {
             hProcess: NULL.cast(),
@@ -113,25 +111,25 @@ impl Process {
                 return Err(io::Error::last_os_error().into());
             }
 
-            CloseHandle(process_information.hThread);
+            // ensure the handle gets cleaned up correctly
+            Thread::from_handle(Handle::from_raw(process_information.hThread));
+
+            let process = Process {
+                handle: Handle::from_raw(process_information.hProcess),
+            };
+
+            Ok(process)
         }
-
-        let process = Process {
-            handle: process_information.hProcess,
-            is_pseudo_handle: false,
-        };
-
-        Ok(process)
     }
 
     #[must_use]
-    pub unsafe fn handle(&self) -> *mut c_void {
-        self.handle
+    pub unsafe fn handle(&self) -> &Handle {
+        &self.handle
     }
 
     pub fn join(&self) -> Result<(), JoinError> {
         unsafe {
-            if WaitForSingleObject(self.handle, INFINITE) == WAIT_FAILED {
+            if WaitForSingleObject(self.handle.as_raw(), INFINITE) == WAIT_FAILED {
                 return Err(io::Error::last_os_error().into());
             }
         }
@@ -140,7 +138,7 @@ impl Process {
     }
 
     pub fn get_id(&self) -> Result<u32, GetIdError> {
-        let process_id = unsafe { GetProcessId(self.handle) };
+        let process_id = unsafe { GetProcessId(self.handle.as_raw()) };
         if process_id == 0 {
             Err(io::Error::last_os_error())?
         } else {
@@ -155,7 +153,8 @@ impl Process {
     #[instrument(ret(level = Level::DEBUG), err)]
     pub fn allocate_read_write_memory(&self, size: usize) -> Result<usize, io::Error> {
         let pointer =
-            unsafe { VirtualAllocEx(self.handle, NULL, size, MEM_COMMIT, PAGE_READWRITE) } as usize;
+            unsafe { VirtualAllocEx(self.handle.as_raw(), NULL, size, MEM_COMMIT, PAGE_READWRITE) }
+                as usize;
         if pointer == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -165,9 +164,15 @@ impl Process {
 
     #[instrument(ret(level = Level::DEBUG), err)]
     pub fn allocate_read_execute_memory(&self, size: usize) -> Result<usize, io::Error> {
-        let pointer =
-            unsafe { VirtualAllocEx(self.handle, NULL, size, MEM_COMMIT, PAGE_EXECUTE_READ) }
-                as usize;
+        let pointer = unsafe {
+            VirtualAllocEx(
+                self.handle.as_raw(),
+                NULL,
+                size,
+                MEM_COMMIT,
+                PAGE_EXECUTE_READ,
+            )
+        } as usize;
         if pointer == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -185,7 +190,7 @@ impl Process {
 
         let data = alloc(Layout::array::<T>(1).unwrap());
         if ReadProcessMemory(
-            self.handle,
+            self.handle.as_raw(),
             address as *mut c_void,
             data.cast(),
             std::mem::size_of::<T>(),
@@ -210,7 +215,7 @@ impl Process {
         let mut data = vec![0; size];
         unsafe {
             if ReadProcessMemory(
-                self.handle,
+                self.handle.as_raw(),
                 address as *mut c_void,
                 data.as_mut_ptr().cast(),
                 size,
@@ -263,7 +268,7 @@ impl Process {
     pub fn write(&self, address: usize, data: &[u8]) -> Result<(), io::Error> {
         unsafe {
             if WriteProcessMemory(
-                self.handle,
+                self.handle.as_raw(),
                 address as *mut c_void,
                 data.as_ptr().cast(),
                 data.len(),
@@ -291,7 +296,7 @@ impl Process {
     ) -> Result<Thread, io::Error> {
         let thread_handle = unsafe {
             CreateRemoteThread(
-                self.handle,
+                self.handle.as_raw(),
                 NULL.cast(),
                 0,
                 Some(transmute(start_address)),
@@ -305,7 +310,7 @@ impl Process {
             return Err(io::Error::last_os_error());
         }
 
-        Ok(unsafe { Thread::from_handle(thread_handle) })
+        Ok(unsafe { Thread::from_handle(Handle::from_raw(thread_handle)) })
     }
 
     #[instrument(
@@ -497,17 +502,9 @@ impl Process {
     }
 }
 
-impl Drop for Process {
-    fn drop(&mut self) {
-        if !self.is_pseudo_handle {
-            unsafe { CloseHandle(self.handle) };
-        }
-    }
-}
-
 pub struct ThreadIdIterator {
     process_id: u32,
-    snapshot_handle: *mut c_void,
+    snapshot_handle: Handle,
     called_thread_32_first: bool,
 }
 
@@ -520,7 +517,7 @@ impl ThreadIdIterator {
 
         Ok(ThreadIdIterator {
             process_id,
-            snapshot_handle,
+            snapshot_handle: unsafe { Handle::from_raw(snapshot_handle) },
             called_thread_32_first: false,
         })
     }
@@ -546,10 +543,10 @@ impl Iterator for ThreadIdIterator {
         loop {
             let next_thread_exists = unsafe {
                 if self.called_thread_32_first {
-                    Thread32Next(self.snapshot_handle, &mut entry)
+                    Thread32Next(self.snapshot_handle.as_raw(), &mut entry)
                 } else {
                     self.called_thread_32_first = true;
-                    Thread32First(self.snapshot_handle, &mut entry)
+                    Thread32First(self.snapshot_handle.as_raw(), &mut entry)
                 }
             } != 0;
 
@@ -568,15 +565,9 @@ impl Iterator for ThreadIdIterator {
     }
 }
 
-impl Drop for ThreadIdIterator {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.snapshot_handle) };
-    }
-}
-
 #[derive(Debug)]
 struct ModuleEntry32Iterator {
-    snapshot_handle: *mut c_void,
+    snapshot_handle: Handle,
     called_module_32_first: bool,
 }
 
@@ -604,7 +595,7 @@ impl ModuleEntry32Iterator {
         }
 
         Ok(ModuleEntry32Iterator {
-            snapshot_handle,
+            snapshot_handle: unsafe { Handle::from_raw(snapshot_handle) },
             called_module_32_first: false,
         })
     }
@@ -630,10 +621,10 @@ impl Iterator for ModuleEntry32Iterator {
 
         let next_thread_exists = unsafe {
             if self.called_module_32_first {
-                Module32Next(self.snapshot_handle, &mut me32)
+                Module32Next(self.snapshot_handle.as_raw(), &mut me32)
             } else {
                 self.called_module_32_first = true;
-                Module32First(self.snapshot_handle, &mut me32)
+                Module32First(self.snapshot_handle.as_raw(), &mut me32)
             }
         } != 0;
 
@@ -642,12 +633,6 @@ impl Iterator for ModuleEntry32Iterator {
         } else {
             None
         }
-    }
-}
-
-impl Drop for ModuleEntry32Iterator {
-    fn drop(&mut self) {
-        unsafe { CloseHandle(self.snapshot_handle) };
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::{
     event::{self, ManualResetEvent},
+    handle::Handle,
     pipe,
 };
 use protocol::{Parcel, Protocol};
@@ -70,29 +71,35 @@ impl HooksTransceiver {
 
         unsafe {
             Self {
-                writer: pipe::Writer::new(writer_handle as _),
-                reader: pipe::Reader::new(reader_handle as _),
-                writer_event: ManualResetEvent::from_handle(writer_event_handle as _),
-                reader_event: ManualResetEvent::from_handle(reader_event_handle as _),
+                writer: pipe::Writer::new(Handle::from_raw(writer_handle as _)),
+                reader: pipe::Reader::new(Handle::from_raw(reader_handle as _)),
+                writer_event: ManualResetEvent::from_handle(Handle::from_raw(
+                    writer_event_handle as _,
+                )),
+                reader_event: ManualResetEvent::from_handle(Handle::from_raw(
+                    reader_event_handle as _,
+                )),
             }
         }
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
-    pub fn to_bytes(&self) -> [u8; Self::SIZE_IN_BYTES] {
+    pub unsafe fn leak_to_bytes(self) -> [u8; Self::SIZE_IN_BYTES] {
         unsafe {
-            [
-                self.writer.handle() as u32,
-                self.reader.handle() as u32,
-                self.writer_event.handle() as u32,
-                self.reader_event.handle() as u32,
+            let bytes = [
+                self.writer.handle().as_raw() as u32,
+                self.reader.handle().as_raw() as u32,
+                self.writer_event.handle().as_raw() as u32,
+                self.reader_event.handle().as_raw() as u32,
             ]
             .iter()
             .flat_map(|h| h.to_ne_bytes())
             .collect::<Vec<_>>()
             .try_into()
-            .unwrap()
+            .unwrap();
+            std::mem::forget(self);
+            bytes
         }
     }
 }

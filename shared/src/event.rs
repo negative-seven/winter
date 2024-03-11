@@ -1,26 +1,23 @@
-use crate::process::Process;
+use crate::handle::{self, Handle};
 use std::io;
 use thiserror::Error;
 use winapi::{
-    ctypes::c_void,
     shared::{
         minwindef::{FALSE, TRUE},
         ntdef::NULL,
         winerror::WAIT_TIMEOUT,
     },
     um::{
-        handleapi::DuplicateHandle,
         minwinbase::SECURITY_ATTRIBUTES,
         synchapi::{CreateEventA, ResetEvent, SetEvent, WaitForSingleObject},
         winbase::{INFINITE, WAIT_FAILED, WAIT_OBJECT_0},
-        winnt::DUPLICATE_SAME_ACCESS,
     },
 };
 
 #[derive(Debug)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ManualResetEvent {
-    handle: *mut c_void,
+    handle: Handle,
 }
 
 impl ManualResetEvent {
@@ -42,42 +39,27 @@ impl ManualResetEvent {
             if handle == NULL {
                 return Err(io::Error::last_os_error().into());
             }
-            Ok(Self::from_handle(handle))
-        }
-    }
-
-    pub unsafe fn from_handle(handle: *mut c_void) -> Self {
-        Self { handle }
-    }
-
-    pub fn try_clone(&self) -> Result<Self, CloneError> {
-        unsafe {
-            let current_process_handle = Process::get_current().handle();
-            let mut duplicated_handle = NULL;
-            if DuplicateHandle(
-                current_process_handle,
-                self.handle,
-                current_process_handle,
-                &mut duplicated_handle,
-                0,
-                TRUE,
-                DUPLICATE_SAME_ACCESS,
-            ) == 0
-            {
-                return Err(io::Error::last_os_error().into());
-            }
-            Ok(Self::from_handle(duplicated_handle))
+            Ok(Self::from_handle(Handle::from_raw(handle)))
         }
     }
 
     #[must_use]
-    pub unsafe fn handle(&self) -> *mut c_void {
-        self.handle
+    pub unsafe fn from_handle(handle: Handle) -> Self {
+        Self { handle }
+    }
+
+    pub fn try_clone(&self) -> Result<Self, CloneError> {
+        unsafe { Ok(Self::from_handle(self.handle.try_clone()?)) }
+    }
+
+    #[must_use]
+    pub unsafe fn handle(&self) -> &Handle {
+        &self.handle
     }
 
     pub fn get(&self) -> Result<bool, GetError> {
         unsafe {
-            match WaitForSingleObject(self.handle, 0) {
+            match WaitForSingleObject(self.handle.as_raw(), 0) {
                 WAIT_OBJECT_0 => Ok(true),
                 WAIT_TIMEOUT => Ok(false),
                 WAIT_FAILED => Err(io::Error::last_os_error().into()),
@@ -88,7 +70,7 @@ impl ManualResetEvent {
 
     pub fn wait(&self) -> Result<(), GetError> {
         unsafe {
-            match WaitForSingleObject(self.handle, INFINITE) {
+            match WaitForSingleObject(self.handle.as_raw(), INFINITE) {
                 WAIT_OBJECT_0 => Ok(()),
                 WAIT_FAILED => Err(io::Error::last_os_error().into()),
                 _ => unreachable!(),
@@ -98,7 +80,7 @@ impl ManualResetEvent {
 
     pub fn set(&mut self) -> Result<(), SetError> {
         unsafe {
-            if SetEvent(self.handle) == 0 {
+            if SetEvent(self.handle.as_raw()) == 0 {
                 return Err(io::Error::last_os_error().into());
             }
             Ok(())
@@ -107,7 +89,7 @@ impl ManualResetEvent {
 
     pub fn reset(&mut self) -> Result<(), ResetError> {
         unsafe {
-            if ResetEvent(self.handle) == 0 {
+            if ResetEvent(self.handle.as_raw()) == 0 {
                 return Err(io::Error::last_os_error().into());
             }
             Ok(())
@@ -121,7 +103,7 @@ pub struct NewError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 #[error("failed to clone event")]
-pub struct CloneError(#[from] io::Error);
+pub struct CloneError(#[from] handle::CloneError);
 
 #[derive(Debug, Error)]
 #[error("failed to get event state")]

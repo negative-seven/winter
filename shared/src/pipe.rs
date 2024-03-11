@@ -1,3 +1,4 @@
+use crate::handle::Handle;
 use std::io::{Read, Write};
 use thiserror::Error;
 use winapi::{
@@ -11,15 +12,15 @@ use winapi::{
 };
 
 pub fn new() -> Result<(Writer, Reader), NewError> {
-    let mut read_handle = std::ptr::null_mut();
-    let mut write_handle = std::ptr::null_mut();
-    let security_attributes = SECURITY_ATTRIBUTES {
-        #[allow(clippy::cast_possible_truncation)]
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: NULL.cast(),
-        bInheritHandle: TRUE,
-    };
     unsafe {
+        let mut read_handle = std::ptr::null_mut();
+        let mut write_handle = std::ptr::null_mut();
+        let security_attributes = SECURITY_ATTRIBUTES {
+            #[allow(clippy::cast_possible_truncation)]
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: NULL.cast(),
+            bInheritHandle: TRUE,
+        };
         if CreatePipe(
             &mut read_handle,
             &mut write_handle,
@@ -29,31 +30,37 @@ pub fn new() -> Result<(Writer, Reader), NewError> {
         {
             return Err(NewError(std::io::Error::last_os_error()));
         }
-    }
 
-    Ok((
-        Writer {
-            handle: write_handle,
-        },
-        Reader {
-            handle: read_handle,
-        },
-    ))
+        Ok((
+            Writer {
+                handle: Handle::from_raw(write_handle),
+            },
+            Reader {
+                handle: Handle::from_raw(read_handle),
+            },
+        ))
+    }
 }
 
 #[derive(Debug)]
 pub struct Writer {
-    handle: *mut c_void,
+    handle: Handle,
 }
 
 impl Writer {
-    pub unsafe fn new(handle: *mut c_void) -> Self {
+    #[must_use]
+    pub unsafe fn new(handle: Handle) -> Self {
         Self { handle }
     }
 
     #[must_use]
-    pub unsafe fn handle(&self) -> *mut c_void {
-        self.handle
+    pub unsafe fn handle(&self) -> &Handle {
+        &self.handle
+    }
+
+    #[must_use]
+    pub unsafe fn leak(self) -> *mut c_void {
+        self.handle.leak()
     }
 }
 
@@ -62,7 +69,7 @@ impl Write for Writer {
         let mut written_count = 0u32;
         unsafe {
             if WriteFile(
-                self.handle,
+                self.handle.as_raw(),
                 buf.as_ptr().cast(),
                 buf.len()
                     .try_into()
@@ -87,17 +94,23 @@ unsafe impl Send for Writer {}
 
 #[derive(Debug)]
 pub struct Reader {
-    handle: *mut c_void,
+    handle: Handle,
 }
 
 impl Reader {
-    pub unsafe fn new(handle: *mut c_void) -> Self {
+    #[must_use]
+    pub unsafe fn new(handle: Handle) -> Self {
         Self { handle }
     }
 
     #[must_use]
-    pub unsafe fn handle(&self) -> *mut c_void {
-        self.handle
+    pub unsafe fn handle(&self) -> &Handle {
+        &self.handle
+    }
+
+    #[must_use]
+    pub unsafe fn leak(self) -> *mut c_void {
+        self.handle.leak()
     }
 }
 
@@ -106,7 +119,7 @@ impl Read for Reader {
         let mut pending_count = 0;
         unsafe {
             if PeekNamedPipe(
-                self.handle,
+                self.handle.as_raw(),
                 NULL,
                 0,
                 NULL.cast(),
@@ -121,7 +134,7 @@ impl Read for Reader {
             let mut read_count = 0u32;
             unsafe {
                 if ReadFile(
-                    self.handle,
+                    self.handle.as_raw(),
                     buf.as_mut_ptr().cast(),
                     u32::min(pending_count, buf.len().try_into().unwrap()),
                     &mut read_count,
