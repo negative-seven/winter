@@ -1,6 +1,6 @@
 use anyhow::Result;
 use shared::{
-    communication::{self, new_transceiver_pair, HooksMessage, RuntimeTransceiver},
+    communication::{self, new_transceiver_pair, HooksMessage, RuntimeMessage, Transceiver},
     pipe, process, thread,
 };
 use std::{
@@ -18,7 +18,7 @@ pub struct Runtime {
     process: process::Process,
     running: Arc<AtomicBool>,
     stdout_thread: Option<JoinHandle<()>>,
-    transceiver: RuntimeTransceiver,
+    transceiver: Transceiver<RuntimeMessage, HooksMessage>,
 }
 
 impl Runtime {

@@ -8,7 +8,7 @@ use hooks::{
 };
 use minhook::MinHook;
 use shared::{
-    communication::{HooksMessage, HooksTransceiver},
+    communication::{HooksMessage, RuntimeMessage, Transceiver},
     process,
 };
 use static_init::dynamic;
@@ -55,13 +55,15 @@ fn hook_function(
 
 #[no_mangle]
 pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
-    let mut transceiver = HooksTransceiver::from_bytes(
-        process::Process::get_current()
-            .read_to_vec(serialized_transceiver_pointer, 16)
-            .unwrap()
-            .try_into()
-            .unwrap(),
-    );
+    let mut transceiver = unsafe {
+        Transceiver::<HooksMessage, RuntimeMessage>::from_bytes(
+            process::Process::get_current()
+                .read_to_vec(serialized_transceiver_pointer, 16)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+    };
 
     for (module_name, function_name, hook) in [
         (

@@ -4,166 +4,118 @@ use crate::{
     pipe,
 };
 use protocol::{Parcel, Protocol};
-use std::io::{self, Read, Write};
+use std::{
+    fmt::Debug,
+    io::{self, Read, Write},
+    marker::PhantomData,
+};
 use thiserror::Error;
 use tracing::{debug, error, instrument};
 
 #[derive(Debug)]
-pub struct RuntimeTransceiver {
+pub struct Transceiver<S: Parcel + Debug, R: Parcel + Debug> {
     writer: pipe::Writer,
     reader: pipe::Reader,
     writer_event: ManualResetEvent,
     reader_event: ManualResetEvent,
+    _phantom_data: PhantomData<(S, R)>, // circumvents "parameter is never used" errors
 }
 
-impl RuntimeTransceiver {
+impl<S: Parcel + Debug, R: Parcel + Debug> Transceiver<S, R> {
     #[instrument]
-    pub fn send(&mut self, message: &RuntimeMessage) -> Result<(), SendError> {
-        debug!("sending runtime message");
-        transceiver_send(&mut self.writer, &mut self.writer_event, message)
-    }
-
-    #[instrument]
-    pub fn receive(&mut self) -> Result<Option<HooksMessage>, ReceiveError> {
-        transceiver_receive(&mut self.reader, &mut self.reader_event)
-    }
-
-    #[instrument]
-    pub fn receive_blocking(&mut self) -> Result<HooksMessage, ReceiveError> {
-        transceiver_receive_blocking(&mut self.reader, &mut self.reader_event)
-    }
-}
-
-#[derive(Debug)]
-pub struct HooksTransceiver {
-    writer: pipe::Writer,
-    reader: pipe::Reader,
-    writer_event: ManualResetEvent,
-    reader_event: ManualResetEvent,
-}
-
-impl HooksTransceiver {
-    const SIZE_IN_BYTES: usize = 16;
-
-    #[instrument]
-    pub fn send(&mut self, message: &HooksMessage) -> Result<(), SendError> {
+    pub fn send(&mut self, message: &S) -> Result<(), SendError> {
         debug!("sending hooks message");
-        transceiver_send(&mut self.writer, &mut self.writer_event, message)
+        #[allow(clippy::cast_possible_truncation)]
+        self.writer.write_all(
+            &message
+                .raw_bytes(&protocol::Settings::default())
+                .map_err(|_| SendError::Protocol)?,
+        )?;
+        self.writer.flush()?;
+        self.writer_event.set()?;
+        Ok(())
     }
 
     #[instrument]
-    pub fn receive(&mut self) -> Result<Option<RuntimeMessage>, ReceiveError> {
-        transceiver_receive(&mut self.reader, &mut self.reader_event)
+    pub fn receive(&mut self) -> Result<Option<R>, ReceiveError> {
+        if !self.reader_event.get()? {
+            return Ok(None);
+        }
+        self.reader_event.reset()?;
+        let mut bytes = Vec::new();
+        self.reader.read_to_end(&mut bytes)?;
+        R::from_raw_bytes(&bytes, &protocol::Settings::default())
+            .map(Some)
+            .map_err(|_| ReceiveError::Protocol)
     }
 
     #[instrument]
-    pub fn receive_blocking(&mut self) -> Result<RuntimeMessage, ReceiveError> {
-        transceiver_receive_blocking(&mut self.reader, &mut self.reader_event)
+    pub fn receive_blocking(&mut self) -> Result<R, ReceiveError> {
+        self.reader_event.wait()?;
+        self.reader_event.reset()?;
+        let mut bytes = Vec::new();
+        self.reader.read_to_end(&mut bytes)?;
+        R::from_raw_bytes(&bytes, &protocol::Settings::default())
+            .map_err(|_| ReceiveError::Protocol)
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
-    pub fn from_bytes(bytes: [u8; Self::SIZE_IN_BYTES]) -> Self {
+    pub unsafe fn from_bytes(bytes: [u8; 16]) -> Self {
         let writer_handle = u32::from_ne_bytes(bytes[0..4].try_into().unwrap());
         let reader_handle = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
         let writer_event_handle = u32::from_ne_bytes(bytes[8..12].try_into().unwrap());
         let reader_event_handle = u32::from_ne_bytes(bytes[12..16].try_into().unwrap());
 
-        unsafe {
-            Self {
-                writer: pipe::Writer::new(Handle::from_raw(writer_handle as _)),
-                reader: pipe::Reader::new(Handle::from_raw(reader_handle as _)),
-                writer_event: ManualResetEvent::from_handle(Handle::from_raw(
-                    writer_event_handle as _,
-                )),
-                reader_event: ManualResetEvent::from_handle(Handle::from_raw(
-                    reader_event_handle as _,
-                )),
-            }
+        Self {
+            writer: pipe::Writer::new(Handle::from_raw(writer_handle as _)),
+            reader: pipe::Reader::new(Handle::from_raw(reader_handle as _)),
+            writer_event: ManualResetEvent::from_handle(Handle::from_raw(writer_event_handle as _)),
+            reader_event: ManualResetEvent::from_handle(Handle::from_raw(reader_event_handle as _)),
+            _phantom_data: PhantomData,
         }
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
-    pub unsafe fn leak_to_bytes(self) -> [u8; Self::SIZE_IN_BYTES] {
-        unsafe {
-            let bytes = [
-                self.writer.handle().as_raw() as u32,
-                self.reader.handle().as_raw() as u32,
-                self.writer_event.handle().as_raw() as u32,
-                self.reader_event.handle().as_raw() as u32,
-            ]
-            .iter()
-            .flat_map(|h| h.to_ne_bytes())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-            std::mem::forget(self);
-            bytes
-        }
+    pub unsafe fn leak_to_bytes(self) -> [u8; 16] {
+        let bytes = [
+            self.writer.handle().as_raw() as u32,
+            self.reader.handle().as_raw() as u32,
+            self.writer_event.handle().as_raw() as u32,
+            self.reader_event.handle().as_raw() as u32,
+        ]
+        .iter()
+        .flat_map(|h| h.to_ne_bytes())
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+        std::mem::forget(self);
+        bytes
     }
 }
 
-fn transceiver_send<W: Write, M: Parcel>(
-    write: &mut W,
-    event: &mut ManualResetEvent,
-    message: &M,
-) -> Result<(), SendError> {
-    #[allow(clippy::cast_possible_truncation)]
-    write.write_all(
-        &message
-            .raw_bytes(&protocol::Settings::default())
-            .map_err(|_| SendError::Protocol)?,
-    )?;
-    write.flush()?;
-    event.set()?;
-    Ok(())
-}
-
-fn transceiver_receive<R: Read, M: Parcel>(
-    read: &mut R,
-    event: &mut ManualResetEvent,
-) -> Result<Option<M>, ReceiveError> {
-    if !event.get()? {
-        return Ok(None);
-    }
-    event.reset()?;
-    let mut bytes = Vec::new();
-    read.read_to_end(&mut bytes)?;
-    M::from_raw_bytes(&bytes, &protocol::Settings::default())
-        .map(Some)
-        .map_err(|_| ReceiveError::Protocol)
-}
-
-fn transceiver_receive_blocking<R: Read, M: Parcel>(
-    read: &mut R,
-    event: &mut ManualResetEvent,
-) -> Result<M, ReceiveError> {
-    event.wait()?;
-    event.reset()?;
-    let mut bytes = Vec::new();
-    read.read_to_end(&mut bytes)?;
-    M::from_raw_bytes(&bytes, &protocol::Settings::default()).map_err(|_| ReceiveError::Protocol)
-}
-
-pub fn new_transceiver_pair(
-) -> Result<(RuntimeTransceiver, HooksTransceiver), NewTransceiverPairError> {
+#[allow(clippy::type_complexity)]
+pub fn new_transceiver_pair<P0: Parcel + Debug, P1: Parcel + Debug>(
+) -> Result<(Transceiver<P0, P1>, Transceiver<P1, P0>), NewTransceiverPairError> {
     let (pipe_0_writer, pipe_0_reader) = pipe::new()?;
     let (pipe_1_writer, pipe_1_reader) = pipe::new()?;
     let pipe_0_event = ManualResetEvent::new()?;
     let pipe_1_event = ManualResetEvent::new()?;
     Ok((
-        RuntimeTransceiver {
+        Transceiver::<P0, P1> {
             writer: pipe_0_writer,
             reader: pipe_1_reader,
             writer_event: pipe_0_event.try_clone()?,
             reader_event: pipe_1_event.try_clone()?,
+            _phantom_data: PhantomData,
         },
-        HooksTransceiver {
+        Transceiver::<P1, P0> {
             writer: pipe_1_writer,
             reader: pipe_0_reader,
             writer_event: pipe_1_event,
             reader_event: pipe_0_event,
+            _phantom_data: PhantomData,
         },
     ))
 }
