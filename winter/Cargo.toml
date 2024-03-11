@@ -8,4 +8,4 @@ anyhow = "1.0.69"
 thiserror = "1.0.38"
 tracing = "0.1.39"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
-windows = { path = "../windows" }
+shared = { path = "../shared" }

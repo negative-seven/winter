@@ -7,9 +7,12 @@ use hooks::{
     query_performance_counter, query_performance_frequency, sleep, time_get_time,
 };
 use minhook::MinHook;
+use shared::{
+    communication::{HooksMessage, HooksTransceiver},
+    process,
+};
 use static_init::dynamic;
 use std::{collections::HashMap, error::Error, ffi::c_void};
-use windows::process;
 
 #[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
 #[dynamic]
@@ -51,7 +54,15 @@ fn hook_function(
 }
 
 #[no_mangle]
-pub extern "stdcall" fn initialize(_: usize) {
+pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
+    let mut transceiver = HooksTransceiver::from_bytes(
+        process::Process::get_current()
+            .read_to_vec(serialized_transceiver_pointer, 8)
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    );
+
     for (module_name, function_name, hook) in [
         (
             "user32.dll",
@@ -85,4 +96,6 @@ pub extern "stdcall" fn initialize(_: usize) {
     ] {
         let _ = hook_function(module_name, function_name, hook);
     }
+
+    transceiver.send(&HooksMessage::HooksInitialized).unwrap();
 }

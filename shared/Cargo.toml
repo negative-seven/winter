@@ -1,9 +1,10 @@
 [package]
-name = "windows"
+name = "shared"
 version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+protocol = { version = "3.4.0", features = ["derive"] }
 thiserror = "1.0.38"
 tracing = "0.1.39"
 winapi = { version = "0.3.9", features = [

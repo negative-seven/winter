@@ -1,4 +1,8 @@
 use anyhow::Result;
+use shared::{
+    communication::{self, new_transceiver_pair, HooksMessage, RuntimeTransceiver},
+    pipe, process, thread,
+};
 use std::{
     io::Read,
     sync::{
@@ -9,12 +13,13 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use windows::{pipe, process, thread};
+use tracing::{error, warn};
 
 pub struct Runtime {
     process: process::Process,
     running: Arc<AtomicBool>,
     stdout_thread: Option<JoinHandle<()>>,
+    transceiver: RuntimeTransceiver,
 }
 
 impl Runtime {
@@ -54,6 +59,10 @@ impl Runtime {
             })
         };
 
+        // hooks_transceiver must be created before the process, so that its handles can
+        // be inherited
+        let (mut transceiver, hooks_transceiver) = new_transceiver_pair()?;
+
         let subprocess = process::Process::create(
             executable_path.as_ref(),
             true,
@@ -63,16 +72,38 @@ impl Runtime {
         )?;
         subprocess.inject_dll(injected_dll_path.as_ref())?;
 
-        let initialize_function = subprocess.get_export_address(injected_dll_name, "initialize")?;
+        let serialized_hooks_transceiver = hooks_transceiver.to_bytes();
+        let serialized_hooks_transceiver_pointer = subprocess
+            .allocate_read_write_memory(serialized_hooks_transceiver.len())
+            .map_err(NewError::ProcessAllocate)?;
         subprocess
-            .create_thread(initialize_function, false, None)
-            .map_err(NewError::ThreadCreate)?
-            .join()?;
+            .write(
+                serialized_hooks_transceiver_pointer,
+                &serialized_hooks_transceiver,
+            )
+            .map_err(NewError::ProcessWrite)?;
+        subprocess
+            .create_thread(
+                subprocess.get_export_address(injected_dll_name, "initialize")?,
+                false,
+                Some(serialized_hooks_transceiver_pointer as _),
+            )
+            .map_err(NewError::ThreadCreate)?;
+
+        loop {
+            match transceiver.receive()? {
+                Some(HooksMessage::HooksInitialized) => break,
+                Some(message) => warn!("unexpected message: {message:?}"),
+                None => (),
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
 
         Ok(Self {
             process: subprocess,
             running: subprocess_is_running,
             stdout_thread: Some(stdout_thread),
+            transceiver,
         })
     }
 
@@ -105,11 +136,14 @@ impl Runtime {
 #[error("failed to create winter runtime")]
 pub enum NewError {
     NewPipe(#[from] pipe::NewError),
+    NewTransceiverPair(#[from] communication::NewTransceiverPairError),
     ProcessCreate(#[from] process::CreateError),
     InjectDll(#[from] process::InjectDllError),
+    ProcessAllocate(#[source] std::io::Error),
+    ProcessWrite(#[source] std::io::Error),
     GetExportAddress(#[from] process::GetExportAddressError),
     ThreadCreate(#[source] std::io::Error),
-    ThreadJoin(#[from] thread::JoinError),
+    TransceiverRead(#[from] communication::ReadError),
 }
 
 #[derive(Debug, Error)]

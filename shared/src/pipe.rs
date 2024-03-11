@@ -1,5 +1,4 @@
 use std::io::{Read, Write};
-
 use thiserror::Error;
 use winapi::{
     ctypes::c_void,
@@ -47,6 +46,12 @@ pub struct Writer {
     pub(crate) handle: *mut c_void,
 }
 
+impl Writer {
+    pub unsafe fn new(handle: *mut c_void) -> Self {
+        Self { handle }
+    }
+}
+
 impl Write for Writer {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let mut written_count = 0u32;
@@ -78,6 +83,12 @@ unsafe impl Send for Writer {}
 #[derive(Debug)]
 pub struct Reader {
     pub(crate) handle: *mut c_void,
+}
+
+impl Reader {
+    pub unsafe fn new(handle: *mut c_void) -> Self {
+        Self { handle }
+    }
 }
 
 impl Read for Reader {
