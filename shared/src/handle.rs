@@ -62,6 +62,8 @@ impl Drop for Handle {
     }
 }
 
+unsafe impl Send for Handle {}
+
 #[derive(Debug, Error)]
 #[error("failed to clone handle")]
 pub struct CloneError(#[from] io::Error);
