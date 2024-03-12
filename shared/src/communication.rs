@@ -3,17 +3,21 @@ use crate::{
     handle::Handle,
     pipe,
 };
-use protocol::{Parcel, Protocol};
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::Debug,
-    io::{self, Read, Write},
+    io::{self, Write},
     marker::PhantomData,
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument};
 
 #[derive(Debug)]
-pub struct Transceiver<S: Parcel + Debug, R: Parcel + Debug> {
+pub struct Transceiver<S, R>
+where
+    S: Serialize + for<'de> Deserialize<'de> + Debug,
+    R: Serialize + for<'de> Deserialize<'de> + Debug,
+{
     writer: pipe::Writer,
     reader: pipe::Reader,
     writer_event: ManualResetEvent,
@@ -21,16 +25,16 @@ pub struct Transceiver<S: Parcel + Debug, R: Parcel + Debug> {
     _phantom_data: PhantomData<(S, R)>, // circumvents "parameter is never used" errors
 }
 
-impl<S: Parcel + Debug, R: Parcel + Debug> Transceiver<S, R> {
+impl<S, R> Transceiver<S, R>
+where
+    S: Serialize + for<'de> Deserialize<'de> + Debug,
+    R: Serialize + for<'de> Deserialize<'de> + Debug,
+{
     #[instrument]
     pub fn send(&mut self, message: &S) -> Result<(), SendError> {
         debug!("sending hooks message");
         #[allow(clippy::cast_possible_truncation)]
-        self.writer.write_all(
-            &message
-                .raw_bytes(&protocol::Settings::default())
-                .map_err(|_| SendError::Protocol)?,
-        )?;
+        self.writer.write_all(&bincode::serialize(&message)?)?;
         self.writer.flush()?;
         self.writer_event.set()?;
         Ok(())
@@ -42,21 +46,14 @@ impl<S: Parcel + Debug, R: Parcel + Debug> Transceiver<S, R> {
             return Ok(None);
         }
         self.reader_event.reset()?;
-        let mut bytes = Vec::new();
-        self.reader.read_to_end(&mut bytes)?;
-        R::from_raw_bytes(&bytes, &protocol::Settings::default())
-            .map(Some)
-            .map_err(|_| ReceiveError::Protocol)
+        Ok(bincode::deserialize_from(&mut self.reader)?)
     }
 
     #[instrument]
     pub fn receive_blocking(&mut self) -> Result<R, ReceiveError> {
         self.reader_event.wait()?;
         self.reader_event.reset()?;
-        let mut bytes = Vec::new();
-        self.reader.read_to_end(&mut bytes)?;
-        R::from_raw_bytes(&bytes, &protocol::Settings::default())
-            .map_err(|_| ReceiveError::Protocol)
+        Ok(bincode::deserialize_from(&mut self.reader)?)
     }
 
     #[must_use]
@@ -96,8 +93,12 @@ impl<S: Parcel + Debug, R: Parcel + Debug> Transceiver<S, R> {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn new_transceiver_pair<P0: Parcel + Debug, P1: Parcel + Debug>(
-) -> Result<(Transceiver<P0, P1>, Transceiver<P1, P0>), NewTransceiverPairError> {
+pub fn new_transceiver_pair<P0, P1>(
+) -> Result<(Transceiver<P0, P1>, Transceiver<P1, P0>), NewTransceiverPairError>
+where
+    P0: Serialize + for<'de> Deserialize<'de> + Debug,
+    P1: Serialize + for<'de> Deserialize<'de> + Debug,
+{
     let (pipe_0_writer, pipe_0_reader) = pipe::new()?;
     let (pipe_1_writer, pipe_1_reader) = pipe::new()?;
     let pipe_0_event = ManualResetEvent::new()?;
@@ -128,13 +129,11 @@ pub enum NewTransceiverPairError {
     CloneEvent(#[from] event::CloneError),
 }
 
-#[derive(Debug, Protocol)]
-#[protocol(discriminant = "integer")]
+#[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum RuntimeMessage {}
 
-#[derive(Debug, Protocol)]
-#[protocol(discriminant = "integer")]
+#[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum HooksMessage {
@@ -145,17 +144,16 @@ pub enum HooksMessage {
 #[derive(Debug, Error)]
 #[error("error during transceiver send")]
 pub enum SendError {
+    Bincode(#[from] bincode::Error),
     EventSet(#[from] event::SetError),
     Io(#[from] io::Error),
-    Protocol,
 }
 
 // protocol::Error isn't stored inside as it does not implement Sync
 #[derive(Debug, Error)]
 #[error("error during transceiver receive")]
 pub enum ReceiveError {
+    Bincode(#[from] bincode::Error),
     EventGet(#[from] event::GetError),
     EventReset(#[from] event::ResetError),
-    Io(#[from] io::Error),
-    Protocol,
 }
