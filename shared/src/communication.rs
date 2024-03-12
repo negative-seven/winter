@@ -20,8 +20,10 @@ where
 {
     writer: pipe::Writer,
     reader: pipe::Reader,
-    writer_event: ManualResetEvent,
-    reader_event: ManualResetEvent,
+    writer_send_event: ManualResetEvent,
+    writer_acknowledge_event: ManualResetEvent,
+    reader_send_event: ManualResetEvent,
+    reader_acknowledge_event: ManualResetEvent,
     _phantom_data: PhantomData<(S, R)>, // circumvents "parameter is never used" errors
 }
 
@@ -36,51 +38,60 @@ where
         #[allow(clippy::cast_possible_truncation)]
         self.writer.write_all(&bincode::serialize(&message)?)?;
         self.writer.flush()?;
-        self.writer_event.set()?;
+        self.writer_send_event.set()?;
+        self.writer_acknowledge_event.wait()?;
+        self.writer_acknowledge_event.reset()?;
         Ok(())
     }
 
     #[instrument]
     pub fn receive(&mut self) -> Result<Option<R>, ReceiveError> {
-        if !self.reader_event.get()? {
+        if !self.reader_send_event.get()? {
             return Ok(None);
         }
-        self.reader_event.reset()?;
-        Ok(bincode::deserialize_from(&mut self.reader)?)
+        self.reader_send_event.reset()?;
+        let received = bincode::deserialize_from(&mut self.reader)?;
+        self.reader_acknowledge_event.set()?;
+        Ok(Some(received))
     }
 
     #[instrument]
     pub fn receive_blocking(&mut self) -> Result<R, ReceiveError> {
-        self.reader_event.wait()?;
-        self.reader_event.reset()?;
-        Ok(bincode::deserialize_from(&mut self.reader)?)
+        self.reader_send_event.wait()?;
+        self.reader_send_event.reset()?;
+        let received = bincode::deserialize_from(&mut self.reader)?;
+        self.reader_acknowledge_event.set()?;
+        Ok(received)
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
-    pub unsafe fn from_bytes(bytes: [u8; 16]) -> Self {
-        let writer_handle = u32::from_ne_bytes(bytes[0..4].try_into().unwrap());
-        let reader_handle = u32::from_ne_bytes(bytes[4..8].try_into().unwrap());
-        let writer_event_handle = u32::from_ne_bytes(bytes[8..12].try_into().unwrap());
-        let reader_event_handle = u32::from_ne_bytes(bytes[12..16].try_into().unwrap());
+    pub unsafe fn from_bytes(bytes: [u8; 24]) -> Self {
+        let mut handles = bytes
+            .chunks(4)
+            .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
 
         Self {
-            writer: pipe::Writer::new(Handle::from_raw(writer_handle as _)),
-            reader: pipe::Reader::new(Handle::from_raw(reader_handle as _)),
-            writer_event: ManualResetEvent::from_handle(Handle::from_raw(writer_event_handle as _)),
-            reader_event: ManualResetEvent::from_handle(Handle::from_raw(reader_event_handle as _)),
+            writer: pipe::Writer::new(handles.next().unwrap()),
+            reader: pipe::Reader::new(handles.next().unwrap()),
+            writer_send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+            writer_acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+            reader_send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+            reader_acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
             _phantom_data: PhantomData,
         }
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
-    pub unsafe fn leak_to_bytes(self) -> [u8; 16] {
+    pub unsafe fn leak_to_bytes(self) -> [u8; 24] {
         let bytes = [
             self.writer.handle().as_raw() as u32,
             self.reader.handle().as_raw() as u32,
-            self.writer_event.handle().as_raw() as u32,
-            self.reader_event.handle().as_raw() as u32,
+            self.writer_send_event.handle().as_raw() as u32,
+            self.writer_acknowledge_event.handle().as_raw() as u32,
+            self.reader_send_event.handle().as_raw() as u32,
+            self.reader_acknowledge_event.handle().as_raw() as u32,
         ]
         .iter()
         .flat_map(|h| h.to_ne_bytes())
@@ -101,21 +112,27 @@ where
 {
     let (pipe_0_writer, pipe_0_reader) = pipe::new()?;
     let (pipe_1_writer, pipe_1_reader) = pipe::new()?;
-    let pipe_0_event = ManualResetEvent::new()?;
-    let pipe_1_event = ManualResetEvent::new()?;
+    let pipe_0_send_event = ManualResetEvent::new()?;
+    let pipe_0_acknowledge_event = ManualResetEvent::new()?;
+    let pipe_1_send_event = ManualResetEvent::new()?;
+    let pipe_1_acknowledge_event = ManualResetEvent::new()?;
     Ok((
         Transceiver::<P0, P1> {
             writer: pipe_0_writer,
             reader: pipe_1_reader,
-            writer_event: pipe_0_event.try_clone()?,
-            reader_event: pipe_1_event.try_clone()?,
+            writer_send_event: pipe_0_send_event.try_clone()?,
+            writer_acknowledge_event: pipe_0_acknowledge_event.try_clone()?,
+            reader_send_event: pipe_1_send_event.try_clone()?,
+            reader_acknowledge_event: pipe_1_acknowledge_event.try_clone()?,
             _phantom_data: PhantomData,
         },
         Transceiver::<P1, P0> {
             writer: pipe_1_writer,
             reader: pipe_0_reader,
-            writer_event: pipe_1_event,
-            reader_event: pipe_0_event,
+            writer_send_event: pipe_1_send_event,
+            writer_acknowledge_event: pipe_1_acknowledge_event,
+            reader_send_event: pipe_0_send_event,
+            reader_acknowledge_event: pipe_0_acknowledge_event,
             _phantom_data: PhantomData,
         },
     ))
@@ -144,8 +161,10 @@ pub enum HooksMessage {
 #[derive(Debug, Error)]
 #[error("error during transceiver send")]
 pub enum SendError {
+    EventGet(#[from] event::GetError),
     Bincode(#[from] bincode::Error),
     EventSet(#[from] event::SetError),
+    EventReset(#[from] event::ResetError),
     Io(#[from] io::Error),
 }
 
@@ -155,5 +174,6 @@ pub enum SendError {
 pub enum ReceiveError {
     Bincode(#[from] bincode::Error),
     EventGet(#[from] event::GetError),
+    EventSet(#[from] event::SetError),
     EventReset(#[from] event::ResetError),
 }

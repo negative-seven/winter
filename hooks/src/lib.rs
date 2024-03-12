@@ -58,7 +58,7 @@ pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
     let mut transceiver = unsafe {
         Transceiver::<HooksMessage, RuntimeMessage>::from_bytes(
             process::Process::get_current()
-                .read_to_vec(serialized_transceiver_pointer, 16)
+                .read_to_vec(serialized_transceiver_pointer, 24)
                 .unwrap()
                 .try_into()
                 .unwrap(),
