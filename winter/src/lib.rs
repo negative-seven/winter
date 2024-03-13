@@ -115,6 +115,16 @@ impl Runtime {
         Ok(())
     }
 
+    pub fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
+        self.transceiver.send(&RuntimeMessage::AdvanceTime(time))?;
+        Ok(())
+    }
+
+    pub fn wait_until_idle(&self) {
+        // TODO
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
     pub fn wait_until_exit(&mut self) -> Result<(), WaitUntilExitError> {
         self.process.join()?;
         self.running.store(false, Ordering::Relaxed);
@@ -161,6 +171,12 @@ pub enum RuntimeError {
     IterThreadIds(#[from] process::IterThreadIdsError),
     ThreadFromId(#[from] thread::FromIdError),
     ThreadResume(#[from] thread::ResumeError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while waiting for the winter runtime to exit")]
+pub enum AdvanceTimeError {
+    TransceiverSend(#[from] communication::SendError),
 }
 
 #[derive(Debug, Error)]

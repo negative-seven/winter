@@ -1,6 +1,7 @@
 #![allow(clippy::missing_panics_doc)]
 
 mod hooks;
+mod state;
 
 use hooks::{
     get_async_key_state, get_key_state, get_keyboard_state, get_tick_count, peek_message,
@@ -21,18 +22,6 @@ static mut TRAMPOLINES: HashMap<String, usize> = HashMap::new();
 unsafe fn get_trampoline(function_name: impl AsRef<str>) -> *const c_void {
     *TRAMPOLINES.read().get(function_name.as_ref()).unwrap() as *const c_void
 }
-
-const SIMULATED_PERFORMANCE_COUNTER_FREQUENCY: u64 = 1 << 32;
-
-#[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
-#[dynamic]
-static mut TICKS: u64 = 0;
-
-const TICKS_PER_SECOND: u64 = 3000;
-
-#[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
-#[dynamic]
-static mut BUSY_WAIT_COUNT: u64 = 0;
 
 fn hook_function(
     module_name: &str,
@@ -100,4 +89,17 @@ pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
     }
 
     transceiver.send(&HooksMessage::HooksInitialized).unwrap();
+
+    loop {
+        match transceiver.receive_blocking().unwrap() {
+            #[allow(clippy::cast_possible_truncation)]
+            RuntimeMessage::AdvanceTime(duration) => {
+                state::STATE.lock().unwrap().pending_ticks +=
+                    (duration.as_nanos() * u128::from(state::State::TICKS_PER_SECOND)
+                        / std::time::Duration::from_secs(1).as_nanos()) as u64;
+                state::TICKS_PENDING_EVENT.write().set().unwrap();
+            }
+            message => unimplemented!("handle message {message:?}"),
+        }
+    }
 }

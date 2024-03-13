@@ -8,6 +8,7 @@ use std::{
     fmt::Debug,
     io::{self, Write},
     marker::PhantomData,
+    time::Duration,
 };
 use thiserror::Error;
 use tracing::{debug, error, instrument};
@@ -147,8 +148,11 @@ pub enum NewTransceiverPairError {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[repr(u8)]
 #[non_exhaustive]
-pub enum RuntimeMessage {}
+pub enum RuntimeMessage {
+    AdvanceTime(Duration),
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]

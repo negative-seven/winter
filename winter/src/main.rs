@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::env;
+use std::{env, time::Duration};
 use tracing::info;
 use winter::Runtime;
 
@@ -24,7 +24,8 @@ fn main() -> Result<()> {
         }),
     )?;
     runtime.resume()?;
-    runtime.wait_until_exit()?;
-
-    Ok(())
+    loop {
+        runtime.advance_time(Duration::from_secs_f64(1.0 / 60.0))?;
+        runtime.wait_until_idle();
+    }
 }

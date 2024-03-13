@@ -6,6 +6,7 @@ int main()
     for (int i = 0; i < 10; i++)
     {
         printf("%d\n", timeGetTime());
+        fflush(stdout);
 
         Sleep(2);
         Sleep(3);

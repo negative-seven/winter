@@ -12,6 +12,7 @@ int main()
         QueryPerformanceCounter(&counter);
 
         printf("%lld/%lld\n", counter.QuadPart, frequency.QuadPart);
+        fflush(stdout);
 
         Sleep(43);
         Sleep(4);

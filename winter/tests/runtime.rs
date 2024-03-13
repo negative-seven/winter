@@ -3,7 +3,9 @@ use std::{
     path::Path,
     process::Command,
     sync::{Arc, Mutex, Once},
+    time::Duration,
 };
+use tracing::info;
 
 #[allow(clippy::missing_panics_doc)]
 pub fn init_test() {
@@ -29,196 +31,186 @@ pub fn init_test() {
     });
 }
 
-fn run_and_get_stdout(executable_path: &str) -> Result<Vec<u8>> {
+fn run_and_get_stdout(
+    executable_path: &str,
+    advance_time_periods: Vec<Duration>,
+) -> Result<Vec<Vec<u8>>> {
     let stdout = Arc::new(Mutex::new(Vec::new()));
     let stdout_callback = {
         let stdout = Arc::clone(&stdout);
         move |bytes: &_| {
+            for line in String::from_utf8_lossy(bytes).lines() {
+                info!("stdout: {}", line);
+            }
+
             stdout.lock().unwrap().extend_from_slice(bytes);
         }
     };
+    let mut stdout_by_instant = Vec::new();
     let mut runtime = winter::Runtime::new(executable_path, "hooks32.dll", Some(stdout_callback))?;
     runtime.resume()?;
-    runtime.wait_until_exit()?;
-    Ok(Arc::try_unwrap(stdout).unwrap().into_inner().unwrap())
+    {
+        runtime.wait_until_idle();
+        let mut stdout = stdout.lock().unwrap();
+        stdout_by_instant.push(std::mem::take(&mut *stdout));
+    }
+    for advance_time_period in advance_time_periods {
+        runtime.advance_time(advance_time_period)?;
+        runtime.wait_until_idle();
+        let mut stdout = stdout.lock().unwrap();
+        stdout_by_instant.push(std::mem::take(&mut *stdout));
+    }
+    runtime.wait_until_exit()?; // TODO: check that process only exited after the last time advancement
+    Ok(stdout_by_instant)
 }
 
 #[test]
 fn stdout() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/stdout.exe")?;
-    assert_eq!(stdout, b"abcABC123!\"_\x99\xaa\xbb");
+    let stdout = run_and_get_stdout("tests/programs/bin/stdout.exe", Vec::new())?;
+    assert_eq!(stdout, vec![b"abcABC123!\"_\x99\xaa\xbb"]);
     Ok(())
 }
 
 #[test]
 fn get_tick_count() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/get_tick_count.exe")?;
-    let stdout = String::from_utf8_lossy(&stdout);
-
-    let tick_values = stdout
-        .lines()
-        .map(str::parse::<u32>)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    assert_eq!(tick_values.len(), 200);
-    for (index, tick_value) in tick_values.iter().enumerate() {
-        let expected_tick_value = match index {
-            0..=98 => 0,
-            99..=198 => 16,
-            199 => 33,
-            _ => panic!("index is outside expected bounds"),
-        };
-        assert_eq!(
-            *tick_value, expected_tick_value,
-            "unexpected value at index {index}"
-        );
-    }
-
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/get_tick_count.exe",
+        vec![
+            Duration::from_secs_f64(1.0 / 60.0),
+            Duration::from_secs_f64(1.0 / 60.0),
+        ],
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+    assert_eq!(
+        stdout,
+        vec![
+            "0\r\n".repeat(99),
+            "16\r\n".repeat(100),
+            "33\r\n".to_string()
+        ]
+    );
     Ok(())
 }
 
 #[test]
 fn get_tick_count_and_sleep() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/get_tick_count_and_sleep.exe")?;
-    let stdout = String::from_utf8_lossy(&stdout);
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/get_tick_count_and_sleep.exe",
+        [Duration::from_millis(78), Duration::from_millis(1)].repeat(10),
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
 
-    let tick_values = stdout
-        .lines()
-        .map(str::parse::<u32>)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    assert_eq!(tick_values.len(), 10);
-    #[allow(clippy::cast_possible_truncation)]
-    for (index, tick_value) in tick_values.iter().enumerate() {
-        assert_eq!(
-            *tick_value,
-            index as u32 * 79,
-            "unexpected value at index {index}"
-        );
+    let mut expected_stdout = Vec::new();
+    for index in 0..10 {
+        expected_stdout.push(format!("{}\r\n", index * 79));
+        expected_stdout.push(String::new());
     }
-
+    expected_stdout.push(String::new());
+    assert_eq!(stdout, expected_stdout);
     Ok(())
 }
 
 #[test]
 fn time_get_time() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/time_get_time.exe")?;
-    let stdout = String::from_utf8_lossy(&stdout);
-
-    let tick_values = stdout
-        .lines()
-        .map(str::parse::<u32>)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    assert_eq!(tick_values.len(), 200);
-    for (index, tick_value) in tick_values.iter().enumerate() {
-        let expected_tick_value = match index {
-            0..=98 => 0,
-            99..=198 => 16,
-            199 => 33,
-            _ => panic!("index is outside expected bounds"),
-        };
-        assert_eq!(
-            *tick_value, expected_tick_value,
-            "unexpected value at index {index}"
-        );
-    }
-
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/time_get_time.exe",
+        vec![
+            Duration::from_secs_f64(1.0 / 60.0),
+            Duration::from_secs_f64(1.0 / 60.0),
+        ],
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+    assert_eq!(
+        stdout,
+        vec![
+            "0\r\n".repeat(99),
+            "16\r\n".repeat(100),
+            "33\r\n".to_string()
+        ]
+    );
     Ok(())
 }
 
 #[test]
 fn time_get_time_and_sleep() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/time_get_time_and_sleep.exe")?;
-    let stdout = String::from_utf8_lossy(&stdout);
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/time_get_time_and_sleep.exe",
+        [Duration::from_millis(40), Duration::from_millis(1)].repeat(10),
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
 
-    let tick_values = stdout
-        .lines()
-        .map(str::parse::<u32>)
-        .collect::<Result<Vec<_>, _>>()?;
-
-    assert_eq!(tick_values.len(), 10);
-    #[allow(clippy::cast_possible_truncation)]
-    for (index, tick_value) in tick_values.iter().enumerate() {
-        assert_eq!(
-            *tick_value,
-            index as u32 * 41,
-            "unexpected value at index {index}"
-        );
+    let mut expected_stdout = Vec::new();
+    for index in 0..10 {
+        expected_stdout.push(format!("{}\r\n", index * 41));
+        expected_stdout.push(String::new());
     }
-
+    expected_stdout.push(String::new());
+    assert_eq!(stdout, expected_stdout);
     Ok(())
 }
 
 #[test]
 fn query_performance_counter() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/query_performance_counter.exe")?;
-    let stdout = String::from_utf8_lossy(&stdout);
-
-    let mut counter_values = Vec::new();
-    let mut frequency_values = Vec::new();
-    for line in stdout.lines() {
-        let (counter_value_str, frequency_value_str) =
-            line.split_once('/').expect("could not split output by '/'");
-        counter_values.push(str::parse::<u64>(counter_value_str)?);
-        frequency_values.push(str::parse::<u64>(frequency_value_str)?);
-    }
-
-    assert_eq!(counter_values.len(), 200);
-    assert_eq!(frequency_values.len(), 200);
-    assert!(frequency_values.iter().all(|v| *v == frequency_values[0]));
-    for (index, counter_value) in counter_values.iter().enumerate() {
-        let expected_counter_value = {
-            let (numerator, denominator) = match index {
-                0..=98 => (0, 60),
-                99..=198 => (1, 60),
-                199 => (2, 60),
-                _ => panic!("index is outside expected bounds"),
-            };
-            frequency_values[0] * numerator / denominator
-        };
-        assert_eq!(
-            *counter_value, expected_counter_value,
-            "unexpected value at index {index}"
-        );
-    }
-
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/query_performance_counter.exe",
+        vec![
+            Duration::from_secs_f64(1.0 / 60.0),
+            Duration::from_secs_f64(1.0 / 60.0),
+        ],
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+    let frequency =
+        str::parse::<u64>(stdout[0].lines().next().unwrap().split_once('/').unwrap().1).unwrap();
+    assert_eq!(
+        stdout,
+        vec![
+            format!("{}/{}\r\n", 0, frequency).repeat(99),
+            format!("{}/{}\r\n", frequency / 60, frequency).repeat(100),
+            format!("{}/{}\r\n", frequency * 2 / 60, frequency).to_string()
+        ]
+    );
     Ok(())
 }
 
 #[test]
 fn query_performance_counter_and_sleep() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/query_performance_counter_and_sleep.exe")?;
-    let stdout = String::from_utf8_lossy(&stdout);
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/query_performance_counter_and_sleep.exe",
+        [Duration::from_millis(46), Duration::from_millis(1)].repeat(10),
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+    let frequency =
+        str::parse::<u64>(stdout[0].lines().next().unwrap().split_once('/').unwrap().1).unwrap();
 
-    let mut counter_values = Vec::new();
-    let mut frequency_values = Vec::new();
-    for line in stdout.lines() {
-        let (counter_value_str, frequency_value_str) =
-            line.split_once('/').expect("could not split output by '/'");
-        counter_values.push(str::parse::<u64>(counter_value_str)?);
-        frequency_values.push(str::parse::<u64>(frequency_value_str)?);
+    let mut expected_stdout = Vec::new();
+    for index in 0..10 {
+        expected_stdout.push(format!(
+            "{}/{}\r\n",
+            frequency * index * 47 / 1000,
+            frequency
+        ));
+        expected_stdout.push(String::new());
     }
-
-    assert_eq!(counter_values.len(), 10);
-    assert_eq!(frequency_values.len(), 10);
-    assert!(frequency_values.iter().all(|v| *v == frequency_values[0]));
-    for (index, (counter_value, frequency_value)) in
-        counter_values.iter().zip(&frequency_values).enumerate()
-    {
-        assert_eq!(
-            *counter_value,
-            frequency_value * (index as u64) * 47 / 1000,
-            "unexpected value at index {index}"
-        );
-    }
-
+    expected_stdout.push(String::new());
+    assert_eq!(stdout, expected_stdout);
     Ok(())
 }

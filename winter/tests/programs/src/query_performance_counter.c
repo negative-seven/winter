@@ -12,5 +12,6 @@ int main()
         QueryPerformanceCounter(&counter);
 
         printf("%lli/%lli\n", counter.QuadPart, frequency.QuadPart);
+        fflush(stdout);
     }
 }
