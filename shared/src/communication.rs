@@ -34,7 +34,7 @@ where
 {
     #[instrument]
     pub fn send(&mut self, message: &S) -> Result<(), SendError> {
-        debug!("sending hooks message");
+        debug!("sending message");
         #[allow(clippy::cast_possible_truncation)]
         self.writer.write_all(&bincode::serialize(&message)?)?;
         self.writer.flush()?;
