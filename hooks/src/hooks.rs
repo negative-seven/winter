@@ -1,6 +1,6 @@
 use crate::{
     get_trampoline,
-    state::{State, STATE},
+    state::{self, State, STATE},
 };
 use winapi::um::winuser::{MSG, WM_CHAR, WM_KEYDOWN, WM_KEYUP};
 
@@ -21,10 +21,7 @@ pub extern "system" fn get_async_key_state(_: u32) -> u16 {
 }
 
 pub extern "system" fn sleep(milliseconds: u32) {
-    State::sleep(
-        &STATE,
-        u64::from(milliseconds) * State::TICKS_PER_SECOND / 1000,
-    );
+    state::sleep(u64::from(milliseconds) * State::TICKS_PER_SECOND / 1000);
     unsafe {
         let trampoline: extern "system" fn(u32) = std::mem::transmute(get_trampoline("Sleep"));
         trampoline(milliseconds);
@@ -57,7 +54,7 @@ pub extern "system" fn get_tick_count() -> u32 {
     state_guard.busy_wait_count += 1;
     if state_guard.busy_wait_count >= 100 {
         drop(state_guard);
-        State::sleep(&STATE, State::TICKS_PER_SECOND / 60);
+        state::sleep(State::TICKS_PER_SECOND / 60);
         state_guard = STATE.lock().unwrap();
         state_guard.busy_wait_count = 0;
     }
@@ -91,7 +88,7 @@ pub extern "system" fn query_performance_counter(count: *mut u32) -> u32 {
     state_guard.busy_wait_count += 1;
     if state_guard.busy_wait_count >= 100 {
         drop(state_guard);
-        State::sleep(&STATE, State::TICKS_PER_SECOND / 60);
+        state::sleep(State::TICKS_PER_SECOND / 60);
         state_guard = STATE.lock().unwrap();
         state_guard.busy_wait_count = 0;
     }

@@ -10,10 +10,18 @@ use hooks::{
 use minhook::MinHook;
 use shared::{
     communication::{HooksMessage, RuntimeMessage, Transceiver},
+    event::ManualResetEvent,
     process,
 };
 use static_init::dynamic;
-use std::{collections::HashMap, error::Error, ffi::c_void, mem::MaybeUninit};
+use std::{
+    collections::{HashMap, VecDeque},
+    error::Error,
+    ffi::c_void,
+    mem::MaybeUninit,
+    sync::Mutex,
+    time::Duration,
+};
 
 #[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
 #[dynamic]
@@ -25,6 +33,23 @@ unsafe fn get_trampoline(function_name: impl AsRef<str>) -> *const c_void {
 
 static mut TRANSCEIVER: MaybeUninit<Transceiver<HooksMessage, RuntimeMessage>> =
     MaybeUninit::uninit();
+
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Event {
+    AdvanceTime(Duration),
+}
+
+pub struct Events {
+    queue: VecDeque<Event>,
+    pending: ManualResetEvent,
+}
+
+#[dynamic]
+static mut EVENTS: Mutex<Events> = Mutex::new(Events {
+    queue: VecDeque::new(),
+    pending: ManualResetEvent::new().unwrap(),
+});
 
 fn hook_function(
     module_name: &str,
@@ -97,10 +122,10 @@ pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
         match transceiver.receive_blocking().unwrap() {
             #[allow(clippy::cast_possible_truncation)]
             RuntimeMessage::AdvanceTime(duration) => {
-                state::STATE.lock().unwrap().pending_ticks +=
-                    (duration.as_nanos() * u128::from(state::State::TICKS_PER_SECOND)
-                        / std::time::Duration::from_secs(1).as_nanos()) as u64;
-                state::TICKS_PENDING_EVENT.write().set().unwrap();
+                let events = EVENTS.read();
+                let mut events = events.lock().unwrap();
+                events.queue.push_back(Event::AdvanceTime(duration));
+                events.pending.set().unwrap();
             }
             message => unimplemented!("handle message {message:?}"),
         }

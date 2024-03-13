@@ -1,8 +1,6 @@
-use shared::{communication::HooksMessage, event::ManualResetEvent};
-use static_init::dynamic;
+use crate::{Event, EVENTS, TRANSCEIVER};
+use shared::communication::HooksMessage;
 use std::sync::Mutex;
-
-use crate::TRANSCEIVER;
 
 pub struct State {
     pub ticks: u64,
@@ -12,35 +10,6 @@ pub struct State {
 
 impl State {
     pub const TICKS_PER_SECOND: u64 = 3000;
-
-    pub fn sleep(this: &Mutex<Self>, ticks: u64) {
-        let mut remaining_ticks = ticks;
-        loop {
-            let mut this_guard = this.lock().unwrap();
-
-            let ticks_advanced_by = u64::min(this_guard.pending_ticks, remaining_ticks);
-            this_guard.ticks += ticks_advanced_by;
-            remaining_ticks -= ticks_advanced_by;
-            this_guard.pending_ticks -= ticks_advanced_by;
-
-            if remaining_ticks == 0 {
-                break;
-            }
-
-            drop(this_guard);
-
-            unsafe {
-                TRANSCEIVER
-                    .assume_init_ref()
-                    .send(&HooksMessage::Idle)
-                    .unwrap();
-            }
-
-            let mut ticks_pending_event = TICKS_PENDING_EVENT.read().try_clone().unwrap();
-            ticks_pending_event.wait().unwrap();
-            ticks_pending_event.reset().unwrap();
-        }
-    }
 }
 
 pub static STATE: Mutex<State> = Mutex::new(State {
@@ -48,5 +17,51 @@ pub static STATE: Mutex<State> = Mutex::new(State {
     pending_ticks: 0,
     busy_wait_count: 0,
 });
-#[dynamic]
-pub static mut TICKS_PENDING_EVENT: ManualResetEvent = ManualResetEvent::new().unwrap();
+
+pub fn sleep(ticks: u64) {
+    let mut remaining_ticks = ticks;
+    while remaining_ticks > 0 {
+        {
+            let mut state = STATE.lock().unwrap();
+            let ticks_advanced_by = u64::min(state.pending_ticks, remaining_ticks);
+            state.ticks += ticks_advanced_by;
+            state.pending_ticks -= ticks_advanced_by;
+            remaining_ticks -= ticks_advanced_by;
+        }
+
+        if remaining_ticks == 0 {
+            break;
+        }
+
+        loop {
+            let events = EVENTS.read();
+            let mut events_guard = events.lock().unwrap();
+            let event = events_guard.queue.pop_front();
+            match event {
+                #[allow(clippy::cast_possible_truncation)]
+                Some(Event::AdvanceTime(duration)) => {
+                    STATE.lock().unwrap().pending_ticks += (duration.as_nanos()
+                        * u128::from(State::TICKS_PER_SECOND)
+                        / std::time::Duration::from_secs(1).as_nanos())
+                        as u64;
+                    break;
+                }
+                #[allow(unreachable_patterns)] // Event is #[non_exhaustive]
+                Some(event) => unimplemented!("event {event:?}"),
+                None => {
+                    unsafe {
+                        TRANSCEIVER
+                            .assume_init_ref()
+                            .send(&HooksMessage::Idle)
+                            .unwrap();
+                    }
+
+                    let mut event_pending = events_guard.pending.try_clone().unwrap();
+                    event_pending.reset().unwrap();
+                    drop(events_guard);
+                    event_pending.wait().unwrap();
+                }
+            }
+        }
+    }
+}
