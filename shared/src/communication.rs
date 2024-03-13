@@ -188,6 +188,7 @@ pub enum RuntimeMessage {
 #[non_exhaustive]
 pub enum HooksMessage {
     HooksInitialized,
+    Idle,
 }
 
 // protocol::Error isn't stored inside as it does not implement Sync

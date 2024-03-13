@@ -3,21 +3,14 @@ use shared::{
     communication::{self, new_transceiver_pair, HooksMessage, RuntimeMessage, Transceiver},
     pipe, process, thread,
 };
-use std::{
-    io::Read,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread::JoinHandle,
-    time::Duration,
-};
+use std::{io::Read, time::Duration};
 use thiserror::Error;
 
 pub struct Runtime {
     process: process::Process,
-    running: Arc<AtomicBool>,
-    stdout_thread: Option<JoinHandle<()>>,
+    #[allow(clippy::type_complexity)]
+    stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
+    stdout_pipe_reader: pipe::Reader,
     transceiver: Transceiver<RuntimeMessage, HooksMessage>,
 }
 
@@ -35,32 +28,12 @@ impl Runtime {
             .unwrap()
             .to_str()
             .unwrap(); // TODO: handle errors
-        let subprocess_is_running = Arc::new(AtomicBool::new(true));
 
-        let (stdout_pipe_writer, mut stdout_pipe_reader) = pipe::new()?;
-        let stdout_thread = {
-            let stdout_callback = stdout_callback.map(|f| Box::new(f));
-            let subprocess_is_running = Arc::clone(&subprocess_is_running);
-            std::thread::spawn(move || {
-                let mut check_stdout = || {
-                    let mut stdout = Vec::new();
-                    stdout_pipe_reader.read_to_end(&mut stdout).unwrap();
-                    if !stdout.is_empty() {
-                        stdout_callback.as_ref().inspect(|f| f(&stdout));
-                    }
-                };
-
-                while subprocess_is_running.load(Ordering::Relaxed) {
-                    check_stdout();
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                check_stdout();
-            })
-        };
+        let (stdout_pipe_writer, stdout_pipe_reader) = pipe::new()?;
 
         // hooks_transceiver must be created before the process, so that its handles can
         // be inherited
-        let (mut transceiver, hooks_transceiver) = new_transceiver_pair()?;
+        let (transceiver, hooks_transceiver) = new_transceiver_pair()?;
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
@@ -96,8 +69,11 @@ impl Runtime {
 
         Ok(Self {
             process: subprocess,
-            running: subprocess_is_running,
-            stdout_thread: Some(stdout_thread),
+            stdout_callback: match stdout_callback {
+                Some(stdout_callback) => Some(Box::new(*Box::new(stdout_callback))),
+                None => todo!(),
+            },
+            stdout_pipe_reader,
             transceiver,
         })
     }
@@ -120,21 +96,34 @@ impl Runtime {
         Ok(())
     }
 
-    pub fn wait_until_idle(&self) {
-        // TODO
-        std::thread::sleep(Duration::from_millis(100));
+    pub fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
+        match self.transceiver.receive_blocking()? {
+            HooksMessage::Idle => (),
+            message => return Err(UnexpectedMessageError::new(message).into()),
+        }
+        self.check_stdout();
+        Ok(())
     }
 
     pub fn wait_until_exit(&mut self) -> Result<(), WaitUntilExitError> {
         self.process.join()?;
-        self.running.store(false, Ordering::Relaxed);
-        if let Some(stdout_thread) = self.stdout_thread.take() {
-            if let Err(e) = stdout_thread.join() {
-                std::panic::resume_unwind(e);
-            }
-        }
+        self.check_stdout();
         Ok(())
     }
+
+    fn check_stdout(&mut self) {
+        let mut stdout = Vec::new();
+        self.stdout_pipe_reader.read_to_end(&mut stdout).unwrap();
+        if !stdout.is_empty() {
+            self.stdout_callback.as_ref().inspect(|f| f(&stdout));
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("unexpected message received: {message:?}")]
+pub struct UnexpectedMessageError {
+    message: HooksMessage,
 }
 
 #[derive(Debug, Error)]
@@ -150,12 +139,6 @@ pub enum NewError {
     ThreadCreate(#[source] std::io::Error),
     TransceiverRead(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
-}
-
-#[derive(Debug, Error)]
-#[error("unexpected message received: {message:?}")]
-pub struct UnexpectedMessageError {
-    message: HooksMessage,
 }
 
 impl UnexpectedMessageError {
@@ -177,6 +160,13 @@ pub enum RuntimeError {
 #[error("error occurred while waiting for the winter runtime to exit")]
 pub enum AdvanceTimeError {
     TransceiverSend(#[from] communication::SendError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while waiting for the winter runtime to exit")]
+pub enum WaitUntilIdleError {
+    TransceiverReceive(#[from] communication::ReceiveError),
+    UnexpectedMessage(#[from] UnexpectedMessageError),
 }
 
 #[derive(Debug, Error)]

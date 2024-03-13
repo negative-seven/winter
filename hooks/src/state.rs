@@ -1,6 +1,8 @@
-use shared::event::ManualResetEvent;
+use shared::{communication::HooksMessage, event::ManualResetEvent};
 use static_init::dynamic;
 use std::sync::Mutex;
+
+use crate::TRANSCEIVER;
 
 pub struct State {
     pub ticks: u64,
@@ -26,6 +28,13 @@ impl State {
             }
 
             drop(this_guard);
+
+            unsafe {
+                TRANSCEIVER
+                    .assume_init_ref()
+                    .send(&HooksMessage::Idle)
+                    .unwrap();
+            }
 
             let mut ticks_pending_event = TICKS_PENDING_EVENT.read().try_clone().unwrap();
             ticks_pending_event.wait().unwrap();

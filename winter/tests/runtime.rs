@@ -33,7 +33,7 @@ pub fn init_test() {
 
 fn run_and_get_stdout(
     executable_path: &str,
-    advance_time_periods: Vec<Duration>,
+    advance_time_periods: &[Duration],
 ) -> Result<Vec<Vec<u8>>> {
     let stdout = Arc::new(Mutex::new(Vec::new()));
     let stdout_callback = {
@@ -49,25 +49,20 @@ fn run_and_get_stdout(
     let mut stdout_by_instant = Vec::new();
     let mut runtime = winter::Runtime::new(executable_path, "hooks32.dll", Some(stdout_callback))?;
     runtime.resume()?;
-    {
-        runtime.wait_until_idle();
-        let mut stdout = stdout.lock().unwrap();
-        stdout_by_instant.push(std::mem::take(&mut *stdout));
-    }
     for advance_time_period in advance_time_periods {
-        runtime.advance_time(advance_time_period)?;
-        runtime.wait_until_idle();
-        let mut stdout = stdout.lock().unwrap();
-        stdout_by_instant.push(std::mem::take(&mut *stdout));
+        runtime.wait_until_idle()?;
+        stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
+        runtime.advance_time(*advance_time_period)?;
     }
     runtime.wait_until_exit()?; // TODO: check that process only exited after the last time advancement
+    stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
     Ok(stdout_by_instant)
 }
 
 #[test]
 fn stdout() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/stdout.exe", Vec::new())?;
+    let stdout = run_and_get_stdout("tests/programs/bin/stdout.exe", &[])?;
     assert_eq!(stdout, vec![b"abcABC123!\"_\x99\xaa\xbb"]);
     Ok(())
 }
@@ -77,7 +72,7 @@ fn get_tick_count() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/get_tick_count.exe",
-        vec![
+        &[
             Duration::from_secs_f64(1.0 / 60.0),
             Duration::from_secs_f64(1.0 / 60.0),
         ],
@@ -101,7 +96,7 @@ fn get_tick_count_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/get_tick_count_and_sleep.exe",
-        [Duration::from_millis(78), Duration::from_millis(1)].repeat(10),
+        &[Duration::from_millis(78), Duration::from_millis(1)].repeat(10),
     )?
     .iter()
     .map(|b| String::from_utf8_lossy(b).to_string())
@@ -122,7 +117,7 @@ fn time_get_time() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/time_get_time.exe",
-        vec![
+        &[
             Duration::from_secs_f64(1.0 / 60.0),
             Duration::from_secs_f64(1.0 / 60.0),
         ],
@@ -146,7 +141,7 @@ fn time_get_time_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/time_get_time_and_sleep.exe",
-        [Duration::from_millis(40), Duration::from_millis(1)].repeat(10),
+        &[Duration::from_millis(40), Duration::from_millis(1)].repeat(10),
     )?
     .iter()
     .map(|b| String::from_utf8_lossy(b).to_string())
@@ -167,7 +162,7 @@ fn query_performance_counter() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/query_performance_counter.exe",
-        vec![
+        &[
             Duration::from_secs_f64(1.0 / 60.0),
             Duration::from_secs_f64(1.0 / 60.0),
         ],
@@ -193,7 +188,7 @@ fn query_performance_counter_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/query_performance_counter_and_sleep.exe",
-        [Duration::from_millis(46), Duration::from_millis(1)].repeat(10),
+        &[Duration::from_millis(46), Duration::from_millis(1)].repeat(10),
     )?
     .iter()
     .map(|b| String::from_utf8_lossy(b).to_string())

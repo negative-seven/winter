@@ -26,6 +26,6 @@ fn main() -> Result<()> {
     runtime.resume()?;
     loop {
         runtime.advance_time(Duration::from_secs_f64(1.0 / 60.0))?;
-        runtime.wait_until_idle();
+        runtime.wait_until_idle()?;
     }
 }

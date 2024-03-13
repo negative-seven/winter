@@ -13,7 +13,7 @@ use shared::{
     process,
 };
 use static_init::dynamic;
-use std::{collections::HashMap, error::Error, ffi::c_void};
+use std::{collections::HashMap, error::Error, ffi::c_void, mem::MaybeUninit};
 
 #[allow(clippy::ignored_unit_patterns)] // lint triggered inside macro
 #[dynamic]
@@ -22,6 +22,9 @@ static mut TRAMPOLINES: HashMap<String, usize> = HashMap::new();
 unsafe fn get_trampoline(function_name: impl AsRef<str>) -> *const c_void {
     *TRAMPOLINES.read().get(function_name.as_ref()).unwrap() as *const c_void
 }
+
+static mut TRANSCEIVER: MaybeUninit<Transceiver<HooksMessage, RuntimeMessage>> =
+    MaybeUninit::uninit();
 
 fn hook_function(
     module_name: &str,
@@ -44,15 +47,15 @@ fn hook_function(
 
 #[no_mangle]
 pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
-    let mut transceiver = unsafe {
-        Transceiver::<HooksMessage, RuntimeMessage>::from_bytes(
+    unsafe {
+        TRANSCEIVER.write(Transceiver::<HooksMessage, RuntimeMessage>::from_bytes(
             process::Process::get_current()
                 .read_to_vec(serialized_transceiver_pointer, 24)
                 .unwrap()
                 .try_into()
                 .unwrap(),
-        )
-    };
+        ));
+    }
 
     for (module_name, function_name, hook) in [
         (
@@ -88,8 +91,8 @@ pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
         let _ = hook_function(module_name, function_name, hook);
     }
 
+    let transceiver = unsafe { TRANSCEIVER.assume_init_ref() };
     transceiver.send(&HooksMessage::HooksInitialized).unwrap();
-
     loop {
         match transceiver.receive_blocking().unwrap() {
             #[allow(clippy::cast_possible_truncation)]
