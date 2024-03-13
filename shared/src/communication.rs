@@ -8,6 +8,7 @@ use std::{
     fmt::Debug,
     io::{self, Write},
     marker::PhantomData,
+    sync::Mutex,
     time::Duration,
 };
 use thiserror::Error;
@@ -19,12 +20,8 @@ where
     S: Serialize + for<'de> Deserialize<'de> + Debug,
     R: Serialize + for<'de> Deserialize<'de> + Debug,
 {
-    writer: pipe::Writer,
-    reader: pipe::Reader,
-    writer_send_event: ManualResetEvent,
-    writer_acknowledge_event: ManualResetEvent,
-    reader_send_event: ManualResetEvent,
-    reader_acknowledge_event: ManualResetEvent,
+    writer: Mutex<TransceiverWriter>,
+    reader: Mutex<TransceiverReader>,
     _phantom_data: PhantomData<(S, R)>, // circumvents "parameter is never used" errors
 }
 
@@ -34,34 +31,37 @@ where
     R: Serialize + for<'de> Deserialize<'de> + Debug,
 {
     #[instrument]
-    pub fn send(&mut self, message: &S) -> Result<(), SendError> {
+    pub fn send(&self, message: &S) -> Result<(), SendError> {
         debug!("sending message");
+        let mut writer = self.writer.lock().unwrap();
         #[allow(clippy::cast_possible_truncation)]
-        self.writer.write_all(&bincode::serialize(&message)?)?;
-        self.writer.flush()?;
-        self.writer_send_event.set()?;
-        self.writer_acknowledge_event.wait()?;
-        self.writer_acknowledge_event.reset()?;
+        writer.pipe.write_all(&bincode::serialize(&message)?)?;
+        writer.pipe.flush()?;
+        writer.send_event.set()?;
+        writer.acknowledge_event.wait()?;
+        writer.acknowledge_event.reset()?;
         Ok(())
     }
 
     #[instrument]
-    pub fn receive(&mut self) -> Result<Option<R>, ReceiveError> {
-        if !self.reader_send_event.get()? {
+    pub fn receive(&self) -> Result<Option<R>, ReceiveError> {
+        let mut reader = self.reader.lock().unwrap();
+        if !reader.send_event.get()? {
             return Ok(None);
         }
-        self.reader_send_event.reset()?;
-        let received = bincode::deserialize_from(&mut self.reader)?;
-        self.reader_acknowledge_event.set()?;
+        reader.send_event.reset()?;
+        let received = bincode::deserialize_from(&mut reader.pipe)?;
+        reader.acknowledge_event.set()?;
         Ok(Some(received))
     }
 
     #[instrument]
-    pub fn receive_blocking(&mut self) -> Result<R, ReceiveError> {
-        self.reader_send_event.wait()?;
-        self.reader_send_event.reset()?;
-        let received = bincode::deserialize_from(&mut self.reader)?;
-        self.reader_acknowledge_event.set()?;
+    pub fn receive_blocking(&self) -> Result<R, ReceiveError> {
+        let mut reader = self.reader.lock().unwrap();
+        reader.send_event.wait()?;
+        reader.send_event.reset()?;
+        let received = bincode::deserialize_from(&mut reader.pipe)?;
+        reader.acknowledge_event.set()?;
         Ok(received)
     }
 
@@ -73,12 +73,16 @@ where
             .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
 
         Self {
-            writer: pipe::Writer::new(handles.next().unwrap()),
-            reader: pipe::Reader::new(handles.next().unwrap()),
-            writer_send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-            writer_acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-            reader_send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-            reader_acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+            writer: Mutex::new(TransceiverWriter {
+                pipe: pipe::Writer::new(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+            }),
+            reader: Mutex::new(TransceiverReader {
+                pipe: pipe::Reader::new(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+            }),
             _phantom_data: PhantomData,
         }
     }
@@ -86,22 +90,39 @@ where
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
     pub unsafe fn leak_to_bytes(self) -> [u8; 24] {
+        let writer = self.writer.into_inner().unwrap();
+        let reader = self.reader.into_inner().unwrap();
         let bytes = [
-            self.writer.handle().as_raw() as u32,
-            self.reader.handle().as_raw() as u32,
-            self.writer_send_event.handle().as_raw() as u32,
-            self.writer_acknowledge_event.handle().as_raw() as u32,
-            self.reader_send_event.handle().as_raw() as u32,
-            self.reader_acknowledge_event.handle().as_raw() as u32,
+            writer.pipe.handle().as_raw() as u32,
+            writer.send_event.handle().as_raw() as u32,
+            writer.acknowledge_event.handle().as_raw() as u32,
+            reader.pipe.handle().as_raw() as u32,
+            reader.send_event.handle().as_raw() as u32,
+            reader.acknowledge_event.handle().as_raw() as u32,
         ]
         .iter()
         .flat_map(|h| h.to_ne_bytes())
         .collect::<Vec<_>>()
         .try_into()
         .unwrap();
-        std::mem::forget(self);
+        std::mem::forget(writer);
+        std::mem::forget(reader);
         bytes
     }
+}
+
+#[derive(Debug)]
+struct TransceiverWriter {
+    pipe: pipe::Writer,
+    send_event: ManualResetEvent,
+    acknowledge_event: ManualResetEvent,
+}
+
+#[derive(Debug)]
+struct TransceiverReader {
+    pipe: pipe::Reader,
+    send_event: ManualResetEvent,
+    acknowledge_event: ManualResetEvent,
 }
 
 #[allow(clippy::type_complexity)]
@@ -119,21 +140,29 @@ where
     let pipe_1_acknowledge_event = ManualResetEvent::new()?;
     Ok((
         Transceiver::<P0, P1> {
-            writer: pipe_0_writer,
-            reader: pipe_1_reader,
-            writer_send_event: pipe_0_send_event.try_clone()?,
-            writer_acknowledge_event: pipe_0_acknowledge_event.try_clone()?,
-            reader_send_event: pipe_1_send_event.try_clone()?,
-            reader_acknowledge_event: pipe_1_acknowledge_event.try_clone()?,
+            writer: Mutex::new(TransceiverWriter {
+                pipe: pipe_0_writer,
+                send_event: pipe_0_send_event.try_clone()?,
+                acknowledge_event: pipe_0_acknowledge_event.try_clone()?,
+            }),
+            reader: Mutex::new(TransceiverReader {
+                pipe: pipe_1_reader,
+                send_event: pipe_1_send_event.try_clone()?,
+                acknowledge_event: pipe_1_acknowledge_event.try_clone()?,
+            }),
             _phantom_data: PhantomData,
         },
         Transceiver::<P1, P0> {
-            writer: pipe_1_writer,
-            reader: pipe_0_reader,
-            writer_send_event: pipe_1_send_event,
-            writer_acknowledge_event: pipe_1_acknowledge_event,
-            reader_send_event: pipe_0_send_event,
-            reader_acknowledge_event: pipe_0_acknowledge_event,
+            writer: Mutex::new(TransceiverWriter {
+                pipe: pipe_1_writer,
+                send_event: pipe_1_send_event,
+                acknowledge_event: pipe_1_acknowledge_event,
+            }),
+            reader: Mutex::new(TransceiverReader {
+                pipe: pipe_0_reader,
+                send_event: pipe_0_send_event,
+                acknowledge_event: pipe_0_acknowledge_event,
+            }),
             _phantom_data: PhantomData,
         },
     ))
