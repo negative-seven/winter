@@ -1,6 +1,6 @@
 use anyhow::Result;
 use shared::{
-    communication::{self, new_transceiver_pair, HooksMessage, RuntimeMessage, Transceiver},
+    communication::{self, HooksMessage, RuntimeMessage},
     pipe, process, thread,
 };
 use std::{io::Read, time::Duration};
@@ -11,7 +11,8 @@ pub struct Runtime {
     #[allow(clippy::type_complexity)]
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
-    transceiver: Transceiver<RuntimeMessage, HooksMessage>,
+    message_sender: communication::Sender<RuntimeMessage>,
+    message_receiver: communication::Receiver<HooksMessage>,
 }
 
 impl Runtime {
@@ -31,9 +32,10 @@ impl Runtime {
 
         let (stdout_pipe_writer, stdout_pipe_reader) = pipe::new()?;
 
-        // hooks_transceiver must be created before the process, so that its handles can
-        // be inherited
-        let (transceiver, hooks_transceiver) = new_transceiver_pair()?;
+        // sender/receiver pairs must be created before the process, so that their
+        // handles can be inherited
+        let (runtime_sender, hooks_receiver) = communication::new_sender_and_receiver()?;
+        let (hooks_sender, mut runtime_receiver) = communication::new_sender_and_receiver()?;
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
@@ -44,25 +46,26 @@ impl Runtime {
         )?;
         subprocess.inject_dll(injected_dll_path.as_ref())?;
 
-        let serialized_hooks_transceiver = unsafe { hooks_transceiver.leak_to_bytes() };
-        let serialized_hooks_transceiver_pointer = subprocess
-            .allocate_read_write_memory(serialized_hooks_transceiver.len())
+        let serialized_hooks_sender_and_receiver =
+            unsafe { [hooks_sender.leak_to_bytes(), hooks_receiver.leak_to_bytes()].concat() };
+        let serialized_hooks_sender_and_receiver_pointer = subprocess
+            .allocate_read_write_memory(serialized_hooks_sender_and_receiver.len())
             .map_err(NewError::ProcessAllocate)?;
         subprocess
             .write(
-                serialized_hooks_transceiver_pointer,
-                &serialized_hooks_transceiver,
+                serialized_hooks_sender_and_receiver_pointer,
+                &serialized_hooks_sender_and_receiver,
             )
             .map_err(NewError::ProcessWrite)?;
         subprocess
             .create_thread(
                 subprocess.get_export_address(injected_dll_name, "initialize")?,
                 false,
-                Some(serialized_hooks_transceiver_pointer as _),
+                Some(serialized_hooks_sender_and_receiver_pointer as _),
             )
             .map_err(NewError::ThreadCreate)?;
 
-        match transceiver.receive_blocking()? {
+        match runtime_receiver.receive_blocking()? {
             HooksMessage::HooksInitialized => (),
             message => return Err(UnexpectedMessageError::new(message).into()),
         }
@@ -74,7 +77,8 @@ impl Runtime {
                 None => todo!(),
             },
             stdout_pipe_reader,
-            transceiver,
+            message_sender: runtime_sender,
+            message_receiver: runtime_receiver,
         })
     }
 
@@ -92,12 +96,13 @@ impl Runtime {
     }
 
     pub fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
-        self.transceiver.send(&RuntimeMessage::AdvanceTime(time))?;
+        self.message_sender
+            .send(&RuntimeMessage::AdvanceTime(time))?;
         Ok(())
     }
 
     pub fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
-        match self.transceiver.receive_blocking()? {
+        match self.message_receiver.receive_blocking()? {
             HooksMessage::Idle => (),
             message => return Err(UnexpectedMessageError::new(message).into()),
         }
@@ -130,14 +135,14 @@ pub struct UnexpectedMessageError {
 #[error("failed to create winter runtime")]
 pub enum NewError {
     NewPipe(#[from] pipe::NewError),
-    NewTransceiverPair(#[from] communication::NewTransceiverPairError),
+    NewSenderAndReceiver(#[from] communication::NewSenderAndReceiverError),
     ProcessCreate(#[from] process::CreateError),
     InjectDll(#[from] process::InjectDllError),
     ProcessAllocate(#[source] std::io::Error),
     ProcessWrite(#[source] std::io::Error),
     GetExportAddress(#[from] process::GetExportAddressError),
     ThreadCreate(#[source] std::io::Error),
-    TransceiverRead(#[from] communication::ReceiveError),
+    MessageReceive(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
 }
 
@@ -159,13 +164,13 @@ pub enum RuntimeError {
 #[derive(Debug, Error)]
 #[error("error occurred while waiting for the winter runtime to exit")]
 pub enum AdvanceTimeError {
-    TransceiverSend(#[from] communication::SendError),
+    MessageSend(#[from] communication::SendError),
 }
 
 #[derive(Debug, Error)]
 #[error("error occurred while waiting for the winter runtime to exit")]
 pub enum WaitUntilIdleError {
-    TransceiverReceive(#[from] communication::ReceiveError),
+    MessageReceive(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
 }
 

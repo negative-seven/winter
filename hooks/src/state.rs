@@ -1,4 +1,4 @@
-use crate::{Event, EVENTS, TRANSCEIVER};
+use crate::{Event, EVENTS, MESSAGE_SENDER};
 use shared::communication::HooksMessage;
 use std::sync::Mutex;
 
@@ -50,8 +50,10 @@ pub fn sleep(ticks: u64) {
                 Some(event) => unimplemented!("event {event:?}"),
                 None => {
                     unsafe {
-                        TRANSCEIVER
+                        MESSAGE_SENDER
                             .assume_init_ref()
+                            .lock()
+                            .unwrap()
                             .send(&HooksMessage::Idle)
                             .unwrap();
                     }

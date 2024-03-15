@@ -9,7 +9,7 @@ use hooks::{
 };
 use minhook::MinHook;
 use shared::{
-    communication::{HooksMessage, RuntimeMessage, Transceiver},
+    communication::{self, HooksMessage, RuntimeMessage},
     event::ManualResetEvent,
     process,
 };
@@ -31,7 +31,7 @@ unsafe fn get_trampoline(function_name: impl AsRef<str>) -> *const c_void {
     *TRAMPOLINES.read().get(function_name.as_ref()).unwrap() as *const c_void
 }
 
-static mut TRANSCEIVER: MaybeUninit<Transceiver<HooksMessage, RuntimeMessage>> =
+static mut MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<HooksMessage>>> =
     MaybeUninit::uninit();
 
 #[derive(Debug)]
@@ -71,15 +71,25 @@ fn hook_function(
 }
 
 #[no_mangle]
-pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
+pub extern "stdcall" fn initialize(serialized_sender_and_receiver_pointer: usize) {
+    let mut message_receiver;
     unsafe {
-        TRANSCEIVER.write(Transceiver::<HooksMessage, RuntimeMessage>::from_bytes(
+        MESSAGE_SENDER.write(Mutex::new(
+            communication::Sender::<HooksMessage>::from_bytes(
+                process::Process::get_current()
+                    .read_to_vec(serialized_sender_and_receiver_pointer, 12)
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
+        ));
+        message_receiver = communication::Receiver::<RuntimeMessage>::from_bytes(
             process::Process::get_current()
-                .read_to_vec(serialized_transceiver_pointer, 24)
+                .read_to_vec(serialized_sender_and_receiver_pointer + 12, 12)
                 .unwrap()
                 .try_into()
                 .unwrap(),
-        ));
+        );
     }
 
     for (module_name, function_name, hook) in [
@@ -116,10 +126,14 @@ pub extern "stdcall" fn initialize(serialized_transceiver_pointer: usize) {
         let _ = hook_function(module_name, function_name, hook);
     }
 
-    let transceiver = unsafe { TRANSCEIVER.assume_init_ref() };
-    transceiver.send(&HooksMessage::HooksInitialized).unwrap();
+    let message_sender = unsafe { MESSAGE_SENDER.assume_init_ref() };
+    message_sender
+        .lock()
+        .unwrap()
+        .send(&HooksMessage::HooksInitialized)
+        .unwrap();
     loop {
-        match transceiver.receive_blocking().unwrap() {
+        match message_receiver.receive_blocking().unwrap() {
             #[allow(clippy::cast_possible_truncation)]
             RuntimeMessage::AdvanceTime(duration) => {
                 let events = EVENTS.read();
