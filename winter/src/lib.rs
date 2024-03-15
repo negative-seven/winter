@@ -1,6 +1,6 @@
 use anyhow::Result;
 use shared::{
-    communication::{self, HooksMessage, RuntimeMessage},
+    communication::{self, HooksMessage, LogLevel, RuntimeMessage},
     event::{self, ManualResetEvent},
     pipe, process, thread,
 };
@@ -82,6 +82,15 @@ impl Runtime {
                     HooksMessage::HooksInitialized => todo!(),
                     HooksMessage::Idle => idle.set().unwrap(),
                     HooksMessage::Stop => break,
+                    HooksMessage::Log { level, message } => {
+                        match level {
+                            LogLevel::Trace => tracing::trace!(target: "hooks", message),
+                            LogLevel::Debug => tracing::debug!(target: "hooks", message),
+                            LogLevel::Info => tracing::info!(target: "hooks", message),
+                            LogLevel::Warning => tracing::warn!(target: "hooks", message),
+                            LogLevel::Error => tracing::error!(target: "hooks", message),
+                        };
+                    }
                     message => unimplemented!("handle message {message:?}"),
                 }
             })

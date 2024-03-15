@@ -1,5 +1,5 @@
-use crate::{Event, EVENTS, MESSAGE_SENDER};
-use shared::communication::HooksMessage;
+use crate::{log, Event, EVENTS, MESSAGE_SENDER};
+use shared::communication::{HooksMessage, LogLevel};
 use std::sync::Mutex;
 
 pub struct State {
@@ -19,6 +19,8 @@ pub static STATE: Mutex<State> = Mutex::new(State {
 });
 
 pub fn sleep(ticks: u64) {
+    log!(LogLevel::Debug, "sleeping for {ticks} ticks");
+
     let mut remaining_ticks = ticks;
     while remaining_ticks > 0 {
         {

@@ -172,19 +172,27 @@ pub enum NewSenderAndReceiverError {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[repr(u8)]
 #[non_exhaustive]
 pub enum RuntimeMessage {
     AdvanceTime(Duration),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[repr(u8)]
 #[non_exhaustive]
 pub enum HooksMessage {
     HooksInitialized,
     Idle,
     Stop,
+    Log { level: LogLevel, message: String },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warning,
+    Error,
 }
 
 #[derive(Debug, Error)]

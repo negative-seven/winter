@@ -51,6 +51,21 @@ static mut EVENTS: Mutex<Events> = Mutex::new(Events {
     pending: ManualResetEvent::new().unwrap(),
 });
 
+macro_rules! log {
+    ($level:expr, $($format_args:expr),+) => {
+        let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
+        message_sender
+            .lock()
+            .unwrap()
+            .send(&shared::communication::HooksMessage::Log {
+                level: $level,
+                message: format!($($format_args),+),
+            })
+            .unwrap();
+    };
+}
+pub(crate) use log;
+
 fn hook_function(
     module_name: &str,
     function_name: &str,
