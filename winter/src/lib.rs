@@ -1,9 +1,10 @@
 use anyhow::Result;
 use shared::{
     communication::{self, HooksMessage, RuntimeMessage},
+    event::{self, ManualResetEvent},
     pipe, process, thread,
 };
-use std::{io::Read, time::Duration};
+use std::{io::Read, thread::JoinHandle, time::Duration};
 use thiserror::Error;
 
 pub struct Runtime {
@@ -12,7 +13,9 @@ pub struct Runtime {
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
     message_sender: communication::Sender<RuntimeMessage>,
-    message_receiver: communication::Receiver<HooksMessage>,
+    message_self_sender: communication::Sender<HooksMessage>,
+    idle: ManualResetEvent,
+    receive_messages_thread: Option<JoinHandle<()>>,
 }
 
 impl Runtime {
@@ -36,6 +39,7 @@ impl Runtime {
         // handles can be inherited
         let (runtime_sender, hooks_receiver) = communication::new_sender_and_receiver()?;
         let (hooks_sender, mut runtime_receiver) = communication::new_sender_and_receiver()?;
+        let runtime_self_sender = hooks_sender.try_clone()?;
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
@@ -70,6 +74,19 @@ impl Runtime {
             message => return Err(UnexpectedMessageError::new(message).into()),
         }
 
+        let idle = ManualResetEvent::new()?;
+        let receive_messages_thread = {
+            let mut idle = idle.try_clone().unwrap();
+            std::thread::spawn(move || loop {
+                match runtime_receiver.receive_blocking().unwrap() {
+                    HooksMessage::HooksInitialized => todo!(),
+                    HooksMessage::Idle => idle.set().unwrap(),
+                    HooksMessage::Stop => break,
+                    message => unimplemented!("handle message {message:?}"),
+                }
+            })
+        };
+
         Ok(Self {
             process: subprocess,
             stdout_callback: match stdout_callback {
@@ -78,7 +95,9 @@ impl Runtime {
             },
             stdout_pipe_reader,
             message_sender: runtime_sender,
-            message_receiver: runtime_receiver,
+            message_self_sender: runtime_self_sender,
+            idle,
+            receive_messages_thread: Some(receive_messages_thread),
         })
     }
 
@@ -102,17 +121,19 @@ impl Runtime {
     }
 
     pub fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
-        match self.message_receiver.receive_blocking()? {
-            HooksMessage::Idle => (),
-            message => return Err(UnexpectedMessageError::new(message).into()),
-        }
+        self.idle.wait()?;
         self.check_stdout();
+        self.idle.reset()?;
         Ok(())
     }
 
     pub fn wait_until_exit(&mut self) -> Result<(), WaitUntilExitError> {
         self.process.join()?;
         self.check_stdout();
+        self.message_self_sender.send(&HooksMessage::Stop)?;
+        if let Some(thread) = self.receive_messages_thread.take() {
+            thread.join().map_err(|_| WaitUntilExitError::ThreadJoin)?;
+        }
         Ok(())
     }
 
@@ -136,11 +157,13 @@ pub struct UnexpectedMessageError {
 pub enum NewError {
     NewPipe(#[from] pipe::NewError),
     NewSenderAndReceiver(#[from] communication::NewSenderAndReceiverError),
+    MessageSenderClone(#[from] communication::SenderCloneError),
     ProcessCreate(#[from] process::CreateError),
     InjectDll(#[from] process::InjectDllError),
     ProcessAllocate(#[source] std::io::Error),
     ProcessWrite(#[source] std::io::Error),
     GetExportAddress(#[from] process::GetExportAddressError),
+    NewEvent(#[from] event::NewError),
     ThreadCreate(#[source] std::io::Error),
     MessageReceive(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
@@ -170,12 +193,15 @@ pub enum AdvanceTimeError {
 #[derive(Debug, Error)]
 #[error("error occurred while waiting for the winter runtime to exit")]
 pub enum WaitUntilIdleError {
-    MessageReceive(#[from] communication::ReceiveError),
-    UnexpectedMessage(#[from] UnexpectedMessageError),
+    EventGet(#[from] event::GetError),
+    EventReset(#[from] event::ResetError),
+    EventClone(#[from] event::CloneError),
 }
 
 #[derive(Debug, Error)]
 #[error("error occurred while waiting for the winter runtime to exit")]
 pub enum WaitUntilExitError {
-    ProcessJoinError(#[from] process::JoinError),
+    ProcessJoin(#[from] process::JoinError),
+    MessageSend(#[from] communication::SendError),
+    ThreadJoin,
 }

@@ -24,6 +24,15 @@ where
 }
 
 impl<S: Serialize + Debug> Sender<S> {
+    pub fn try_clone(&self) -> Result<Self, SenderCloneError> {
+        Ok(Self {
+            pipe: self.pipe.try_clone()?,
+            send_event: self.send_event.try_clone()?,
+            acknowledge_event: self.acknowledge_event.try_clone()?,
+            _phantom_data: PhantomData,
+        })
+    }
+
     pub fn send(&mut self, message: &S) -> Result<(), SendError> {
         #[allow(clippy::cast_possible_truncation)]
         self.pipe.write_all(&bincode::serialize(&message)?)?;
@@ -175,6 +184,7 @@ pub enum RuntimeMessage {
 pub enum HooksMessage {
     HooksInitialized,
     Idle,
+    Stop,
 }
 
 #[derive(Debug, Error)]
@@ -194,4 +204,11 @@ pub enum ReceiveError {
     EventGet(#[from] event::GetError),
     EventSet(#[from] event::SetError),
     EventReset(#[from] event::ResetError),
+}
+
+#[derive(Debug, Error)]
+#[error("failed to clone sender")]
+pub enum SenderCloneError {
+    PipeWriterClone(#[from] pipe::WriterCloneError),
+    EventClone(#[from] event::CloneError),
 }

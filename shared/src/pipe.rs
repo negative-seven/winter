@@ -1,4 +1,4 @@
-use crate::handle::Handle;
+use crate::handle::{self, Handle};
 use std::io::{Read, Write};
 use thiserror::Error;
 use winapi::{
@@ -48,6 +48,12 @@ pub struct Writer {
 }
 
 impl Writer {
+    pub fn try_clone(&self) -> Result<Self, WriterCloneError> {
+        Ok(Self {
+            handle: self.handle.try_clone()?,
+        })
+    }
+
     #[must_use]
     pub unsafe fn new(handle: Handle) -> Self {
         Self { handle }
@@ -88,6 +94,12 @@ impl Write for Writer {
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
     }
+}
+
+#[derive(Debug, Error)]
+#[error("failed to clone pipe writer")]
+pub enum WriterCloneError {
+    HandleClone(#[from] handle::CloneError),
 }
 
 #[derive(Debug)]
