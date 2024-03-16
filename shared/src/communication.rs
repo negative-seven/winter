@@ -175,6 +175,7 @@ pub enum NewSenderAndReceiverError {
 #[non_exhaustive]
 pub enum RuntimeMessage {
     AdvanceTime(Duration),
+    SetKeyState { id: u8, state: bool },
     IdleRequest,
 }
 

@@ -38,6 +38,7 @@ static mut MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<HooksMessage>
 #[non_exhaustive]
 pub enum Event {
     AdvanceTime(Duration),
+    SetKeyState { id: u8, state: bool },
     Idle,
 }
 
@@ -191,6 +192,9 @@ pub extern "stdcall" fn initialize(serialized_sender_and_receiver_pointer: usize
             #[allow(clippy::cast_possible_truncation)]
             RuntimeMessage::AdvanceTime(duration) => {
                 event_queue.enqueue(Event::AdvanceTime(duration));
+            }
+            RuntimeMessage::SetKeyState { id, state } => {
+                event_queue.enqueue(Event::SetKeyState { id, state });
             }
             RuntimeMessage::IdleRequest => {
                 event_queue.enqueue(Event::Idle);

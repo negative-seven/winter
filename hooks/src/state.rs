@@ -6,6 +6,7 @@ pub struct State {
     pub ticks: u64,
     pub pending_ticks: u64,
     pub busy_wait_count: u64,
+    pub key_states: [bool; 256],
 }
 
 impl State {
@@ -16,6 +17,7 @@ pub static STATE: Mutex<State> = Mutex::new(State {
     ticks: 0,
     pending_ticks: 0,
     busy_wait_count: 0,
+    key_states: [false; 256],
 });
 
 pub fn sleep(ticks: u64) {
@@ -47,6 +49,14 @@ pub fn sleep(ticks: u64) {
                         as u64;
 
                     break;
+                }
+                Event::SetKeyState { id, state } => {
+                    *STATE
+                        .lock()
+                        .unwrap()
+                        .key_states
+                        .get_mut(usize::from(id))
+                        .unwrap() = state;
                 }
                 Event::Idle => unsafe {
                     MESSAGE_SENDER

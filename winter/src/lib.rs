@@ -123,6 +123,12 @@ impl Runtime {
         Ok(())
     }
 
+    pub fn set_key_state(&mut self, id: u8, state: bool) -> Result<(), SetKeyStateError> {
+        self.message_sender
+            .send(&RuntimeMessage::SetKeyState { id, state })?;
+        Ok(())
+    }
+
     pub fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
         self.message_sender
             .send(&RuntimeMessage::AdvanceTime(time))?;
@@ -192,6 +198,12 @@ pub enum RuntimeError {
     IterThreadIds(#[from] process::IterThreadIdsError),
     ThreadFromId(#[from] thread::FromIdError),
     ThreadResume(#[from] thread::ResumeError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while setting key state")]
+pub enum SetKeyStateError {
+    TransceiverSend(#[from] communication::SendError),
 }
 
 #[derive(Debug, Error)]

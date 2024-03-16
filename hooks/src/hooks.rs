@@ -4,20 +4,21 @@ use crate::{
 };
 use winapi::um::winuser::{MSG, WM_CHAR, WM_KEYDOWN, WM_KEYUP};
 
-pub extern "system" fn get_keyboard_state(key_states: *mut bool) {
-    for i in 0..256 {
+pub extern "system" fn get_keyboard_state(key_states: *mut u8) {
+    let state = STATE.lock().unwrap();
+    for i in 0u8..=255u8 {
         unsafe {
-            *(key_states.offset(i)) = false;
+            *(key_states.offset(isize::from(i))) = u8::from(state.key_states[usize::from(i)]) << 7;
         }
     }
 }
 
-pub extern "system" fn get_key_state(_: u32) -> u16 {
-    0
+pub extern "system" fn get_key_state(id: u32) -> u16 {
+    u16::from(STATE.lock().unwrap().key_states[id as usize]) << 15
 }
 
-pub extern "system" fn get_async_key_state(_: u32) -> u16 {
-    0
+pub extern "system" fn get_async_key_state(id: u32) -> u16 {
+    get_key_state(id)
 }
 
 pub extern "system" fn sleep(milliseconds: u32) {

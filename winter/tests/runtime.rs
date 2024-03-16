@@ -31,10 +31,13 @@ pub fn init_test() {
     });
 }
 
-fn run_and_get_stdout(
-    executable_path: &str,
-    advance_time_periods: &[Duration],
-) -> Result<Vec<Vec<u8>>> {
+#[derive(Clone)]
+enum Event {
+    AdvanceTime(Duration),
+    SetKeyState { id: u8, state: bool },
+}
+
+fn run_and_get_stdout(executable_path: &str, events: &[Event]) -> Result<Vec<Vec<u8>>> {
     let stdout = Arc::new(Mutex::new(Vec::new()));
     let stdout_callback = {
         let stdout = Arc::clone(&stdout);
@@ -49,10 +52,17 @@ fn run_and_get_stdout(
     let mut stdout_by_instant = Vec::new();
     let mut runtime = winter::Runtime::new(executable_path, "hooks32.dll", Some(stdout_callback))?;
     runtime.resume()?;
-    for advance_time_period in advance_time_periods {
-        runtime.wait_until_idle()?;
-        stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
-        runtime.advance_time(*advance_time_period)?;
+    for event in events {
+        match event {
+            Event::AdvanceTime(duration) => {
+                runtime.wait_until_idle()?;
+                stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
+                runtime.advance_time(*duration)?;
+            }
+            Event::SetKeyState { id, state } => {
+                runtime.set_key_state(*id, *state)?;
+            }
+        }
     }
     runtime.wait_until_exit()?; // TODO: check that process only exited after the last time advancement
     stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
@@ -73,8 +83,8 @@ fn get_tick_count() -> Result<()> {
     let stdout = run_and_get_stdout(
         "tests/programs/bin/get_tick_count.exe",
         &[
-            Duration::from_secs_f64(1.0 / 60.0),
-            Duration::from_secs_f64(1.0 / 60.0),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
         ],
     )?
     .iter()
@@ -96,7 +106,14 @@ fn get_tick_count_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/get_tick_count_and_sleep.exe",
-        &[Duration::from_millis(78), Duration::from_millis(1)].repeat(10),
+        &[
+            &Event::AdvanceTime(Duration::from_millis(78)),
+            &Event::AdvanceTime(Duration::from_millis(1)),
+        ]
+        .repeat(10)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>(),
     )?
     .iter()
     .map(|b| String::from_utf8_lossy(b).to_string())
@@ -118,8 +135,8 @@ fn time_get_time() -> Result<()> {
     let stdout = run_and_get_stdout(
         "tests/programs/bin/time_get_time.exe",
         &[
-            Duration::from_secs_f64(1.0 / 60.0),
-            Duration::from_secs_f64(1.0 / 60.0),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
         ],
     )?
     .iter()
@@ -141,7 +158,14 @@ fn time_get_time_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/time_get_time_and_sleep.exe",
-        &[Duration::from_millis(40), Duration::from_millis(1)].repeat(10),
+        &[
+            &Event::AdvanceTime(Duration::from_millis(40)),
+            &Event::AdvanceTime(Duration::from_millis(1)),
+        ]
+        .repeat(10)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>(),
     )?
     .iter()
     .map(|b| String::from_utf8_lossy(b).to_string())
@@ -163,8 +187,8 @@ fn query_performance_counter() -> Result<()> {
     let stdout = run_and_get_stdout(
         "tests/programs/bin/query_performance_counter.exe",
         &[
-            Duration::from_secs_f64(1.0 / 60.0),
-            Duration::from_secs_f64(1.0 / 60.0),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
         ],
     )?
     .iter()
@@ -188,7 +212,14 @@ fn query_performance_counter_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
         "tests/programs/bin/query_performance_counter_and_sleep.exe",
-        &[Duration::from_millis(46), Duration::from_millis(1)].repeat(10),
+        &[
+            &Event::AdvanceTime(Duration::from_millis(46)),
+            &Event::AdvanceTime(Duration::from_millis(1)),
+        ]
+        .repeat(10)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>(),
     )?
     .iter()
     .map(|b| String::from_utf8_lossy(b).to_string())
@@ -208,4 +239,68 @@ fn query_performance_counter_and_sleep() -> Result<()> {
     expected_stdout.push(String::new());
     assert_eq!(stdout, expected_stdout);
     Ok(())
+}
+
+fn helper_for_key_state_tests(executable_path: &str) -> Result<()> {
+    fn key_event(id: u8, state: bool) -> Event {
+        Event::SetKeyState { id, state }
+    }
+
+    init_test();
+    let stdout = run_and_get_stdout(
+        executable_path,
+        &[
+            key_event(65, true),
+            key_event(65, true),
+            key_event(66, true),
+            key_event(67, true),
+            Event::AdvanceTime(Duration::from_millis(20)),
+            key_event(65, true),
+            key_event(67, true),
+            Event::AdvanceTime(Duration::from_millis(20)),
+            key_event(68, true),
+            key_event(67, false),
+            key_event(67, false),
+            Event::AdvanceTime(Duration::from_millis(20)),
+            key_event(37, true),
+            key_event(65, false),
+            key_event(37, false),
+            key_event(66, false),
+            key_event(68, false),
+            Event::AdvanceTime(Duration::from_millis(20)),
+            key_event(40, false),
+            key_event(40, true),
+            Event::AdvanceTime(Duration::from_millis(20)),
+        ],
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+    assert_eq!(
+        stdout,
+        [
+            "",
+            "65 66 67 \r\n",
+            "65 66 67 \r\n",
+            "65 66 68 \r\n",
+            "\r\n",
+            "40 \r\n",
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn get_key_state() -> Result<()> {
+    helper_for_key_state_tests("tests/programs/bin/get_key_state.exe")
+}
+
+#[test]
+fn get_async_key_state() -> Result<()> {
+    helper_for_key_state_tests("tests/programs/bin/get_async_key_state.exe")
+}
+
+#[test]
+fn get_keyboard_state() -> Result<()> {
+    helper_for_key_state_tests("tests/programs/bin/get_keyboard_state.exe")
 }

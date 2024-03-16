@@ -7,5 +7,5 @@ if not exist bin mkdir bin
 
 call "%VCVARS_DIR%\vcvars32.bat"
 for %%f in (src/*) do (
-    cl.exe src/%%f winmm.lib /Fo"obj/" /Fe"bin/"
+    cl.exe src/%%f user32.lib winmm.lib /Fo"obj/" /Fe"bin/"
 )
