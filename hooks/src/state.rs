@@ -1,4 +1,4 @@
-use crate::{log, Event, EVENTS, MESSAGE_SENDER};
+use crate::{log, Event, EVENT_QUEUE, MESSAGE_SENDER};
 use shared::communication::{HooksMessage, LogLevel};
 use std::sync::Mutex;
 
@@ -36,35 +36,28 @@ pub fn sleep(ticks: u64) {
         }
 
         loop {
-            let events = EVENTS.read();
-            let mut events_guard = events.lock().unwrap();
-            let event = events_guard.queue.pop_front();
+            let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
+            let event = event_queue.dequeue_blocking();
             match event {
                 #[allow(clippy::cast_possible_truncation)]
-                Some(Event::AdvanceTime(duration)) => {
+                Event::AdvanceTime(duration) => {
                     STATE.lock().unwrap().pending_ticks += (duration.as_nanos()
                         * u128::from(State::TICKS_PER_SECOND)
                         / std::time::Duration::from_secs(1).as_nanos())
                         as u64;
+
                     break;
                 }
+                Event::Idle => unsafe {
+                    MESSAGE_SENDER
+                        .assume_init_ref()
+                        .lock()
+                        .unwrap()
+                        .send(&HooksMessage::Idle)
+                        .unwrap();
+                },
                 #[allow(unreachable_patterns)] // Event is #[non_exhaustive]
-                Some(event) => unimplemented!("event {event:?}"),
-                None => {
-                    unsafe {
-                        MESSAGE_SENDER
-                            .assume_init_ref()
-                            .lock()
-                            .unwrap()
-                            .send(&HooksMessage::Idle)
-                            .unwrap();
-                    }
-
-                    let mut event_pending = events_guard.pending.try_clone().unwrap();
-                    event_pending.reset().unwrap();
-                    drop(events_guard);
-                    event_pending.wait().unwrap();
-                }
+                event => unimplemented!("event {event:?}"),
             }
         }
     }

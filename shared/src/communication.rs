@@ -175,6 +175,7 @@ pub enum NewSenderAndReceiverError {
 #[non_exhaustive]
 pub enum RuntimeMessage {
     AdvanceTime(Duration),
+    IdleRequest,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

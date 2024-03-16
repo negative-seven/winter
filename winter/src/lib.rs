@@ -130,9 +130,10 @@ impl Runtime {
     }
 
     pub fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
+        self.idle.reset()?;
+        self.message_sender.send(&RuntimeMessage::IdleRequest)?;
         self.idle.wait()?;
         self.check_stdout();
-        self.idle.reset()?;
         Ok(())
     }
 
@@ -194,21 +195,21 @@ pub enum RuntimeError {
 }
 
 #[derive(Debug, Error)]
-#[error("error occurred while waiting for the winter runtime to exit")]
+#[error("error occurred while advancing time")]
 pub enum AdvanceTimeError {
     MessageSend(#[from] communication::SendError),
 }
 
 #[derive(Debug, Error)]
-#[error("error occurred while waiting for the winter runtime to exit")]
+#[error("error occurred while waiting for the subprocess to become idle")]
 pub enum WaitUntilIdleError {
     EventGet(#[from] event::GetError),
     EventReset(#[from] event::ResetError),
-    EventClone(#[from] event::CloneError),
+    MessageSend(#[from] communication::SendError),
 }
 
 #[derive(Debug, Error)]
-#[error("error occurred while waiting for the winter runtime to exit")]
+#[error("error occurred while waiting for the subprocess to exit")]
 pub enum WaitUntilExitError {
     ProcessJoin(#[from] process::JoinError),
     MessageSend(#[from] communication::SendError),

@@ -1,7 +1,7 @@
 use crate::handle::Handle;
 use std::io;
 use thiserror::Error;
-use tracing::{debug, instrument, Level};
+use tracing::{instrument, Level};
 use winapi::{
     shared::minwindef::FALSE,
     um::{
@@ -49,8 +49,6 @@ impl Thread {
         if unsafe { ResumeThread(self.handle.as_raw()) } == 0xffff_ffff {
             return Err(io::Error::last_os_error().into());
         }
-
-        debug!("success");
         Ok(())
     }
 

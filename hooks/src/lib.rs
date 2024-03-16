@@ -38,18 +38,54 @@ static mut MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<HooksMessage>
 #[non_exhaustive]
 pub enum Event {
     AdvanceTime(Duration),
+    Idle,
 }
 
-pub struct Events {
+struct EventQueueInner {
     queue: VecDeque<Event>,
-    pending: ManualResetEvent,
+    pending_event: ManualResetEvent,
 }
 
-#[dynamic]
-static mut EVENTS: Mutex<Events> = Mutex::new(Events {
-    queue: VecDeque::new(),
-    pending: ManualResetEvent::new().unwrap(),
-});
+pub struct EventQueue(Mutex<EventQueueInner>);
+
+impl EventQueue {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(Mutex::new(EventQueueInner {
+            queue: VecDeque::new(),
+            pending_event: ManualResetEvent::new().unwrap(),
+        }))
+    }
+
+    pub fn enqueue(&self, event: Event) {
+        let mut inner = self.0.lock().unwrap();
+        inner.queue.push_back(event);
+        inner.pending_event.set().unwrap();
+    }
+
+    pub fn dequeue_blocking(&self) -> Event {
+        let mut inner = self.0.lock().unwrap();
+        if inner.queue.is_empty() {
+            let pending_event = inner.pending_event.try_clone().unwrap();
+            drop(inner);
+            pending_event.wait().unwrap();
+            inner = self.0.lock().unwrap();
+        }
+        let event = inner.queue.pop_front().unwrap();
+        if inner.queue.is_empty() {
+            inner.pending_event.reset().unwrap();
+        }
+        event
+    }
+}
+
+impl Default for EventQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+static mut EVENT_QUEUE: MaybeUninit<EventQueue> = MaybeUninit::uninit();
 
 macro_rules! log {
     ($level:expr, $($format_args:expr),+) => {
@@ -105,6 +141,8 @@ pub extern "stdcall" fn initialize(serialized_sender_and_receiver_pointer: usize
                 .try_into()
                 .unwrap(),
         );
+
+        EVENT_QUEUE.write(EventQueue::new());
     }
 
     for (module_name, function_name, hook) in [
@@ -148,13 +186,14 @@ pub extern "stdcall" fn initialize(serialized_sender_and_receiver_pointer: usize
         .send(&HooksMessage::HooksInitialized)
         .unwrap();
     loop {
+        let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
         match message_receiver.receive_blocking().unwrap() {
             #[allow(clippy::cast_possible_truncation)]
             RuntimeMessage::AdvanceTime(duration) => {
-                let events = EVENTS.read();
-                let mut events = events.lock().unwrap();
-                events.queue.push_back(Event::AdvanceTime(duration));
-                events.pending.set().unwrap();
+                event_queue.enqueue(Event::AdvanceTime(duration));
+            }
+            RuntimeMessage::IdleRequest => {
+                event_queue.enqueue(Event::Idle);
             }
             message => unimplemented!("handle message {message:?}"),
         }
