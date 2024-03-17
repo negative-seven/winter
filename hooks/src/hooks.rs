@@ -29,20 +29,22 @@ pub extern "system" fn sleep(milliseconds: u32) {
     }
 }
 
-pub extern "system" fn peek_message(
-    message_pointer: *mut MSG,
+pub unsafe extern "system" fn peek_message(
+    message: *mut MSG,
     arg1: u32,
     arg2: u32,
     arg3: u32,
     arg4: u32,
 ) -> u32 {
-    unsafe {
+    if let Some(custom_message) = STATE.lock().unwrap().custom_message_queue.pop_front() {
+        *message = custom_message.0;
+        1
+    } else {
         let trampoline: extern "system" fn(*mut MSG, u32, u32, u32, u32) -> u32 =
             std::mem::transmute(get_trampoline("PeekMessageA"));
-
-        let result = trampoline(message_pointer, arg1, arg2, arg3, arg4);
-        if result != 0 && matches!((*message_pointer).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
-            (*message_pointer).message = 0;
+        let result = trampoline(message, arg1, arg2, arg3, arg4);
+        if result != 0 && matches!((*message).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
+            (*message).message = 0;
         }
         result
     }

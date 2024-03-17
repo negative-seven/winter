@@ -304,3 +304,73 @@ fn get_async_key_state() -> Result<()> {
 fn get_keyboard_state() -> Result<()> {
     helper_for_key_state_tests("tests/programs/bin/get_keyboard_state.exe")
 }
+
+#[test]
+fn key_down_and_key_up() -> Result<()> {
+    fn key_event(id: u8, state: bool) -> Event {
+        Event::SetKeyState { id, state }
+    }
+
+    init_test();
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/key_down_and_key_up.exe",
+        &[
+            key_event(65, true),
+            key_event(65, true),
+            key_event(66, true),
+            key_event(67, true),
+            Event::AdvanceTime(Duration::from_millis(77)),
+            key_event(65, true),
+            key_event(67, true),
+            Event::AdvanceTime(Duration::from_millis(18)),
+            key_event(68, true),
+            key_event(67, false),
+            key_event(67, false),
+            Event::AdvanceTime(Duration::from_millis(1)),
+            key_event(37, true),
+            key_event(65, false),
+            key_event(37, false),
+            key_event(66, false),
+            key_event(68, false),
+            Event::AdvanceTime(Duration::from_millis(1)),
+            key_event(40, false),
+            key_event(40, true),
+            Event::AdvanceTime(Duration::from_millis(3)),
+        ],
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+    assert_eq!(
+        stdout,
+        [
+            &[] as &[&str],
+            &[
+                "KEYDOWN 65 00000001",
+                "KEYDOWN 65 40000001",
+                "KEYDOWN 66 00000001",
+                "KEYDOWN 67 00000001",
+            ],
+            &["KEYDOWN 65 40000001", "KEYDOWN 67 40000001"],
+            &[
+                "KEYDOWN 68 00000001",
+                "KEYUP 67 c0000001",
+                "KEYUP 67 80000001",
+            ],
+            &[
+                "KEYDOWN 37 00000001",
+                "KEYUP 65 c0000001",
+                "KEYUP 37 c0000001",
+                "KEYUP 66 c0000001",
+                "KEYUP 68 c0000001"
+            ],
+            &["KEYUP 40 80000001", "KEYDOWN 40 00000001"],
+        ]
+        .map(|item| if item.is_empty() {
+            String::new()
+        } else {
+            item.join("\r\n") + "\r\n"
+        })
+    );
+    Ok(())
+}
