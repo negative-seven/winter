@@ -10,13 +10,9 @@ fn main() -> Result<()> {
 
     let mut arguments = env::args().skip(1);
     let executable_path = arguments.next().expect("missing argument: executable path");
-    let injected_dll_path = arguments
-        .next()
-        .expect("missing argument: injected dll path");
 
     let mut runtime = Runtime::new(
         executable_path,
-        injected_dll_path,
         Some(|bytes: &_| {
             for line in String::from_utf8_lossy(bytes).lines() {
                 info!("stdout: {}", line);

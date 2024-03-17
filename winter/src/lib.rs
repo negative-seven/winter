@@ -21,18 +21,11 @@ pub struct Runtime {
 impl Runtime {
     pub fn new<F>(
         executable_path: impl AsRef<str>,
-        injected_dll_path: impl AsRef<str>,
         stdout_callback: Option<F>,
     ) -> Result<Self, NewError>
     where
         F: Fn(&[u8]) + Send + 'static,
     {
-        let injected_dll_name = std::path::Path::new(injected_dll_path.as_ref())
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap(); // TODO: handle errors
-
         let (stdout_pipe_writer, stdout_pipe_reader) = pipe::new()?;
 
         // sender/receiver pairs must be created before the process, so that their
@@ -48,7 +41,7 @@ impl Runtime {
             Some(stdout_pipe_writer),
             None,
         )?;
-        subprocess.inject_dll(injected_dll_path.as_ref())?;
+        subprocess.inject_dll("hooks32.dll")?;
 
         let serialized_hooks_sender_and_receiver =
             unsafe { [hooks_sender.leak_to_bytes(), hooks_receiver.leak_to_bytes()].concat() };
@@ -63,7 +56,7 @@ impl Runtime {
             .map_err(NewError::ProcessWrite)?;
         subprocess
             .create_thread(
-                subprocess.get_export_address(injected_dll_name, "initialize")?,
+                subprocess.get_export_address("hooks32.dll", "initialize")?,
                 false,
                 Some(serialized_hooks_sender_and_receiver_pointer as _),
             )

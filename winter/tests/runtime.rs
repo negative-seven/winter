@@ -50,7 +50,7 @@ fn run_and_get_stdout(executable_path: &str, events: &[Event]) -> Result<Vec<Vec
         }
     };
     let mut stdout_by_instant = Vec::new();
-    let mut runtime = winter::Runtime::new(executable_path, "hooks32.dll", Some(stdout_callback))?;
+    let mut runtime = winter::Runtime::new(executable_path, Some(stdout_callback))?;
     runtime.resume()?;
     for event in events {
         match event {
