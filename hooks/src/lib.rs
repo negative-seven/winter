@@ -89,7 +89,7 @@ impl Default for EventQueue {
 static mut EVENT_QUEUE: MaybeUninit<EventQueue> = MaybeUninit::uninit();
 
 macro_rules! log {
-    ($level:expr, $($format_args:expr),+) => {
+    ($level:expr, $($format_args:expr $(,)?),+) => {
         let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
         message_sender
             .lock()
