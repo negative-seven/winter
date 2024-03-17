@@ -53,17 +53,7 @@ pub unsafe extern "system" fn peek_message(
 
 #[allow(clippy::cast_possible_truncation)]
 pub extern "system" fn get_tick_count() -> u32 {
-    let mut state_guard = STATE.lock().unwrap();
-
-    state_guard.busy_wait_count += 1;
-    if state_guard.busy_wait_count >= 100 {
-        drop(state_guard);
-        state::sleep(State::TICKS_PER_SECOND / 60);
-        state_guard = STATE.lock().unwrap();
-        state_guard.busy_wait_count = 0;
-    }
-
-    (state_guard.ticks * 1000 / State::TICKS_PER_SECOND) as u32
+    (state::get_ticks_with_busy_wait() * 1000 / State::TICKS_PER_SECOND) as u32
 }
 
 pub extern "system" fn time_get_time() -> u32 {
@@ -87,20 +77,11 @@ pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
 pub extern "system" fn query_performance_counter(count: *mut u32) -> u32 {
     // due to pointer alignment issues, count must be split into two u32 chunks
 
-    let mut state_guard = STATE.lock().unwrap();
-
-    state_guard.busy_wait_count += 1;
-    if state_guard.busy_wait_count >= 100 {
-        drop(state_guard);
-        state::sleep(State::TICKS_PER_SECOND / 60);
-        state_guard = STATE.lock().unwrap();
-        state_guard.busy_wait_count = 0;
-    }
-
     #[allow(clippy::cast_possible_truncation)]
     unsafe {
-        let simulated_performance_counter =
-            state_guard.ticks * SIMULATED_PERFORMANCE_COUNTER_FREQUENCY / State::TICKS_PER_SECOND;
+        let simulated_performance_counter = state::get_ticks_with_busy_wait()
+            * SIMULATED_PERFORMANCE_COUNTER_FREQUENCY
+            / State::TICKS_PER_SECOND;
         *count = simulated_performance_counter as u32;
         *count.offset(1) = (simulated_performance_counter >> 32) as u32;
     }

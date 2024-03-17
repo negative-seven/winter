@@ -18,15 +18,16 @@ pub struct MSGSend(pub MSG);
 unsafe impl Send for MSGSend {}
 
 pub struct State {
-    pub ticks: u64,
-    pub pending_ticks: u64,
-    pub busy_wait_count: u64,
+    ticks: u64,
+    pending_ticks: u64,
+    busy_wait_count: u64,
     pub key_states: [bool; 256],
     pub custom_message_queue: VecDeque<MSGSend>,
 }
 
 impl State {
     pub const TICKS_PER_SECOND: u64 = 3000;
+    const BUSY_WAIT_THRESHOLD: u64 = 100;
 }
 
 pub static STATE: Mutex<State> = Mutex::new(State {
@@ -36,6 +37,18 @@ pub static STATE: Mutex<State> = Mutex::new(State {
     key_states: [false; 256],
     custom_message_queue: VecDeque::new(),
 });
+
+pub fn get_ticks_with_busy_wait() -> u64 {
+    let mut state = STATE.lock().unwrap();
+    state.busy_wait_count += 1;
+    if state.busy_wait_count >= State::BUSY_WAIT_THRESHOLD {
+        drop(state);
+        sleep(State::TICKS_PER_SECOND / 60);
+        state = STATE.lock().unwrap();
+        state.busy_wait_count = 0;
+    }
+    state.ticks
+}
 
 pub fn sleep(ticks: u64) {
     log!(LogLevel::Debug, "sleeping for {ticks} ticks");
