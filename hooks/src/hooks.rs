@@ -36,7 +36,8 @@ pub unsafe extern "system" fn peek_message(
     arg3: u32,
     arg4: u32,
 ) -> u32 {
-    if let Some(custom_message) = STATE.lock().unwrap().custom_message_queue.pop_front() {
+    let custom_message = STATE.lock().unwrap().custom_message_queue.pop_front();
+    if let Some(custom_message) = custom_message {
         *message = custom_message.0;
         1
     } else {
