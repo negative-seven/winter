@@ -2,7 +2,10 @@ use crate::{
     get_trampoline,
     state::{self, State, STATE},
 };
-use winapi::um::winuser::{MSG, WM_CHAR, WM_KEYDOWN, WM_KEYUP};
+use winapi::{
+    shared::{ntdef::NULL, windef::HWND},
+    um::winuser::{MSG, PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP},
+};
 
 pub extern "system" fn get_keyboard_state(key_states: *mut u8) {
     let state = STATE.lock().unwrap();
@@ -31,24 +34,51 @@ pub extern "system" fn sleep(milliseconds: u32) {
 
 pub unsafe extern "system" fn peek_message(
     message: *mut MSG,
-    arg1: u32,
-    arg2: u32,
-    arg3: u32,
-    arg4: u32,
+    window_filter: HWND,
+    minimum_id_filter: u32,
+    maximum_id_filter: u32,
+    flags: u32,
 ) -> u32 {
-    let custom_message = STATE.lock().unwrap().custom_message_queue.pop_front();
-    if let Some(custom_message) = custom_message {
-        *message = custom_message.0;
-        1
-    } else {
-        let trampoline: extern "system" fn(*mut MSG, u32, u32, u32, u32) -> u32 =
-            std::mem::transmute(get_trampoline("PeekMessageA"));
-        let result = trampoline(message, arg1, arg2, arg3, arg4);
-        if result != 0 && matches!((*message).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
-            (*message).message = 0;
+    {
+        let mut state = STATE.lock().unwrap();
+        if !state.custom_message_queue.is_empty() {
+            let id_filter = if minimum_id_filter == 0 && maximum_id_filter == 0 {
+                u32::MIN..=u32::MAX
+            } else {
+                minimum_id_filter..=maximum_id_filter
+            };
+
+            for (custom_message_index, custom_message) in
+                state.custom_message_queue.iter().enumerate()
+            {
+                if window_filter != NULL.cast() && custom_message.0.hwnd != window_filter {
+                    continue;
+                }
+                if !id_filter.contains(&custom_message.0.message) {
+                    continue;
+                }
+                *message = custom_message.0;
+                if flags & PM_REMOVE != 0 {
+                    state.custom_message_queue.remove(custom_message_index);
+                }
+                return 1;
+            }
         }
-        result
     }
+
+    let trampoline: extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> u32 =
+        std::mem::transmute(get_trampoline("PeekMessageA"));
+    let result = trampoline(
+        message,
+        window_filter,
+        minimum_id_filter,
+        maximum_id_filter,
+        flags,
+    );
+    if result != 0 && matches!((*message).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
+        (*message).message = 0;
+    }
+    result
 }
 
 #[allow(clippy::cast_possible_truncation)]
