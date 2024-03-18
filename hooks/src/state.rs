@@ -9,7 +9,7 @@ use winapi::{
         ntdef::NULL,
         windef::{HWND, POINT},
     },
-    um::winuser::{EnumThreadWindows, MSG, WM_KEYDOWN, WM_KEYUP},
+    um::winuser::{EnumThreadWindows, IsWindowVisible, MSG, WM_KEYDOWN, WM_KEYUP},
 };
 
 #[derive(Clone)]
@@ -95,6 +95,10 @@ pub fn sleep(ticks: u64) {
                     );
                     for thread_id in process::Process::get_current().iter_thread_ids().unwrap() {
                         unsafe extern "system" fn callback(window: HWND, message: isize) -> i32 {
+                            if window != NULL.cast() && IsWindowVisible(window) == 0 {
+                                return 1;
+                            }
+
                             let message = &mut *(message as *mut MSGSend);
                             message.0.hwnd = window;
                             STATE
