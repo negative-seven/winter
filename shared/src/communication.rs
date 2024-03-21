@@ -204,7 +204,7 @@ pub enum SendError {
     Bincode(#[from] bincode::Error),
     EventSet(#[from] event::SetError),
     EventReset(#[from] event::ResetError),
-    Io(#[from] io::Error),
+    Os(#[from] io::Error),
 }
 
 #[derive(Debug, Error)]

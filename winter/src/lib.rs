@@ -41,6 +41,7 @@ impl Runtime {
             Some(stdout_pipe_writer),
             None,
         )?;
+        subprocess.kill_on_current_process_exit()?;
         subprocess.inject_dll("hooks32.dll")?;
 
         let serialized_hooks_sender_and_receiver =
@@ -168,6 +169,7 @@ pub enum NewError {
     NewSenderAndReceiver(#[from] communication::NewSenderAndReceiverError),
     MessageSenderClone(#[from] communication::SenderCloneError),
     ProcessCreate(#[from] process::CreateError),
+    KillOnCurrentProcessExit(#[from] process::KillOnCurrentProcessExitError),
     InjectDll(#[from] process::InjectDllError),
     ProcessAllocate(#[source] std::io::Error),
     ProcessWrite(#[source] std::io::Error),

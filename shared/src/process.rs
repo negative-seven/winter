@@ -12,6 +12,7 @@ use winapi::{
     shared::{minwindef::TRUE, ntdef::NULL, winerror::ERROR_BAD_LENGTH},
     um::{
         handleapi::INVALID_HANDLE_VALUE,
+        jobapi2::{AssignProcessToJobObject, SetInformationJobObject},
         memoryapi::{ReadProcessMemory, VirtualAllocEx, WriteProcessMemory},
         processthreadsapi::{
             CreateProcessA, CreateRemoteThread, GetCurrentProcess, GetProcessId,
@@ -23,11 +24,14 @@ use winapi::{
             MODULEENTRY32, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32, TH32CS_SNAPTHREAD,
             THREADENTRY32,
         },
-        winbase::{CREATE_SUSPENDED, INFINITE, STARTF_USESTDHANDLES, WAIT_FAILED},
+        winbase::{
+            CreateJobObjectA, CREATE_SUSPENDED, INFINITE, STARTF_USESTDHANDLES, WAIT_FAILED,
+        },
         winnt::{
-            IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER, IMAGE_EXPORT_DIRECTORY,
-            IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, MEM_COMMIT,
-            PAGE_EXECUTE_READ, PAGE_READWRITE,
+            JobObjectExtendedLimitInformation, IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER,
+            IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER32,
+            IMAGE_OPTIONAL_HEADER64, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_READWRITE,
         },
     },
 };
@@ -125,6 +129,42 @@ impl Process {
     #[must_use]
     pub unsafe fn handle(&self) -> &Handle {
         &self.handle
+    }
+
+    pub fn kill_on_current_process_exit(&self) -> Result<(), KillOnCurrentProcessExitError> {
+        unsafe {
+            let job = CreateJobObjectA(NULL.cast(), NULL.cast());
+            if job == NULL {
+                return Err(io::Error::last_os_error().into());
+            }
+            let job = Handle::from_raw(job);
+
+            let information = {
+                let mut information: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+                information.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                information
+            };
+
+            #[allow(clippy::cast_possible_truncation)]
+            if SetInformationJobObject(
+                job.as_raw(),
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(information).cast_mut().cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            ) == 0
+            {
+                return Err(io::Error::last_os_error().into());
+            }
+
+            if AssignProcessToJobObject(job.as_raw(), self.handle.as_raw()) == 0 {
+                return Err(io::Error::last_os_error().into());
+            }
+
+            // purposefully leak handle so that it gets closed on process exit
+            let _ = job.leak();
+        }
+
+        Ok(())
     }
 
     pub fn join(&self) -> Result<(), JoinError> {
@@ -640,6 +680,12 @@ impl Iterator for ModuleEntry32Iterator {
 #[error("failed to create process")]
 pub enum CreateError {
     PathContainsNul(#[from] NulError),
+    Os(#[from] io::Error),
+}
+
+#[derive(Debug, Error)]
+#[error("failed to set process to be killed on current process exit")]
+pub enum KillOnCurrentProcessExitError {
     Os(#[from] io::Error),
 }
 
