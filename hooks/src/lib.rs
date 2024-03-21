@@ -9,7 +9,7 @@ use hooks::{
 };
 use minhook::MinHook;
 use shared::{
-    communication::{self, HooksMessage, RuntimeMessage},
+    communication::{self, ConductorMessage, HooksMessage},
     event::ManualResetEvent,
     process,
 };
@@ -135,7 +135,7 @@ pub extern "stdcall" fn initialize(serialized_sender_and_receiver_pointer: usize
                     .unwrap(),
             ),
         ));
-        message_receiver = communication::Receiver::<RuntimeMessage>::from_bytes(
+        message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
             process::Process::get_current()
                 .read_to_vec(serialized_sender_and_receiver_pointer + 12, 12)
                 .unwrap()
@@ -190,13 +190,13 @@ pub extern "stdcall" fn initialize(serialized_sender_and_receiver_pointer: usize
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
         match message_receiver.receive_blocking().unwrap() {
             #[allow(clippy::cast_possible_truncation)]
-            RuntimeMessage::AdvanceTime(duration) => {
+            ConductorMessage::AdvanceTime(duration) => {
                 event_queue.enqueue(Event::AdvanceTime(duration));
             }
-            RuntimeMessage::SetKeyState { id, state } => {
+            ConductorMessage::SetKeyState { id, state } => {
                 event_queue.enqueue(Event::SetKeyState { id, state });
             }
-            RuntimeMessage::IdleRequest => {
+            ConductorMessage::IdleRequest => {
                 event_queue.enqueue(Event::Idle);
             }
             message => unimplemented!("handle message {message:?}"),

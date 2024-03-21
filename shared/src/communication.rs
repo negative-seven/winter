@@ -173,7 +173,7 @@ pub enum NewSenderAndReceiverError {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
-pub enum RuntimeMessage {
+pub enum ConductorMessage {
     AdvanceTime(Duration),
     SetKeyState { id: u8, state: bool },
     IdleRequest,

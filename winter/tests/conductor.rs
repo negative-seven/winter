@@ -50,21 +50,21 @@ fn run_and_get_stdout(executable_path: &str, events: &[Event]) -> Result<Vec<Vec
         }
     };
     let mut stdout_by_instant = Vec::new();
-    let mut runtime = winter::Runtime::new(executable_path, Some(stdout_callback))?;
-    runtime.resume()?;
+    let mut conductor = winter::Conductor::new(executable_path, Some(stdout_callback))?;
+    conductor.resume()?;
     for event in events {
         match event {
             Event::AdvanceTime(duration) => {
-                runtime.wait_until_idle()?;
+                conductor.wait_until_idle()?;
                 stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
-                runtime.advance_time(*duration)?;
+                conductor.advance_time(*duration)?;
             }
             Event::SetKeyState { id, state } => {
-                runtime.set_key_state(*id, *state)?;
+                conductor.set_key_state(*id, *state)?;
             }
         }
     }
-    runtime.wait_until_exit()?; // TODO: check that process only exited after the last time advancement
+    conductor.wait_until_exit()?; // TODO: check that process only exited after the last time advancement
     stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
     Ok(stdout_by_instant)
 }

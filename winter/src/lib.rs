@@ -1,24 +1,24 @@
 use anyhow::Result;
 use shared::{
-    communication::{self, HooksMessage, LogLevel, RuntimeMessage},
+    communication::{self, ConductorMessage, HooksMessage, LogLevel},
     event::{self, ManualResetEvent},
     pipe, process, thread,
 };
 use std::{io::Read, thread::JoinHandle, time::Duration};
 use thiserror::Error;
 
-pub struct Runtime {
+pub struct Conductor {
     process: process::Process,
     #[allow(clippy::type_complexity)]
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
-    message_sender: communication::Sender<RuntimeMessage>,
+    message_sender: communication::Sender<ConductorMessage>,
     message_self_sender: communication::Sender<HooksMessage>,
     idle: ManualResetEvent,
     receive_messages_thread: Option<JoinHandle<()>>,
 }
 
-impl Runtime {
+impl Conductor {
     pub fn new<F>(
         executable_path: impl AsRef<str>,
         stdout_callback: Option<F>,
@@ -30,9 +30,9 @@ impl Runtime {
 
         // sender/receiver pairs must be created before the process, so that their
         // handles can be inherited
-        let (runtime_sender, hooks_receiver) = communication::new_sender_and_receiver()?;
-        let (hooks_sender, mut runtime_receiver) = communication::new_sender_and_receiver()?;
-        let runtime_self_sender = hooks_sender.try_clone()?;
+        let (conductor_sender, hooks_receiver) = communication::new_sender_and_receiver()?;
+        let (hooks_sender, mut conductor_receiver) = communication::new_sender_and_receiver()?;
+        let conductor_self_sender = hooks_sender.try_clone()?;
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
@@ -63,7 +63,7 @@ impl Runtime {
             )
             .map_err(NewError::ThreadCreate)?;
 
-        match runtime_receiver.receive_blocking()? {
+        match conductor_receiver.receive_blocking()? {
             HooksMessage::HooksInitialized => (),
             message => return Err(UnexpectedMessageError::new(message).into()),
         }
@@ -72,7 +72,7 @@ impl Runtime {
         let receive_messages_thread = {
             let mut idle = idle.try_clone().unwrap();
             std::thread::spawn(move || loop {
-                match runtime_receiver.receive_blocking().unwrap() {
+                match conductor_receiver.receive_blocking().unwrap() {
                     HooksMessage::HooksInitialized => todo!(),
                     HooksMessage::Idle => idle.set().unwrap(),
                     HooksMessage::Stop => break,
@@ -97,14 +97,14 @@ impl Runtime {
                 None => todo!(),
             },
             stdout_pipe_reader,
-            message_sender: runtime_sender,
-            message_self_sender: runtime_self_sender,
+            message_sender: conductor_sender,
+            message_self_sender: conductor_self_sender,
             idle,
             receive_messages_thread: Some(receive_messages_thread),
         })
     }
 
-    pub fn resume(&self) -> Result<(), RuntimeError> {
+    pub fn resume(&self) -> Result<(), ResumeError> {
         for thread in self
             .process
             .iter_thread_ids()?
@@ -119,19 +119,19 @@ impl Runtime {
 
     pub fn set_key_state(&mut self, id: u8, state: bool) -> Result<(), SetKeyStateError> {
         self.message_sender
-            .send(&RuntimeMessage::SetKeyState { id, state })?;
+            .send(&ConductorMessage::SetKeyState { id, state })?;
         Ok(())
     }
 
     pub fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
         self.message_sender
-            .send(&RuntimeMessage::AdvanceTime(time))?;
+            .send(&ConductorMessage::AdvanceTime(time))?;
         Ok(())
     }
 
     pub fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
         self.idle.reset()?;
-        self.message_sender.send(&RuntimeMessage::IdleRequest)?;
+        self.message_sender.send(&ConductorMessage::IdleRequest)?;
         self.idle.wait()?;
         self.check_stdout();
         Ok(())
@@ -163,7 +163,7 @@ pub struct UnexpectedMessageError {
 }
 
 #[derive(Debug, Error)]
-#[error("failed to create winter runtime")]
+#[error("failed to create conductor")]
 pub enum NewError {
     NewPipe(#[from] pipe::NewError),
     NewSenderAndReceiver(#[from] communication::NewSenderAndReceiverError),
@@ -188,8 +188,8 @@ impl UnexpectedMessageError {
 }
 
 #[derive(Debug, Error)]
-#[error("error in winter runtime")]
-pub enum RuntimeError {
+#[error("error occurred while resuming")]
+pub enum ResumeError {
     IterThreadIds(#[from] process::IterThreadIdsError),
     ThreadFromId(#[from] thread::FromIdError),
     ThreadResume(#[from] thread::ResumeError),
