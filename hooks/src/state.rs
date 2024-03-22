@@ -3,13 +3,16 @@ use shared::{
     communication::{HooksMessage, LogLevel},
     process,
 };
-use std::{collections::VecDeque, sync::Mutex};
+use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex};
 use winapi::{
     shared::{
         ntdef::NULL,
         windef::{HWND, POINT},
     },
-    um::winuser::{EnumThreadWindows, IsWindowVisible, MSG, WM_KEYDOWN, WM_KEYUP},
+    um::{
+        processthreadsapi::GetCurrentThreadId,
+        winuser::{EnumThreadWindows, IsWindowVisible, MSG, WM_KEYDOWN, WM_KEYUP},
+    },
 };
 
 #[derive(Clone)]
@@ -38,19 +41,30 @@ pub static STATE: Mutex<State> = Mutex::new(State {
     custom_message_queue: VecDeque::new(),
 });
 
+pub static mut MAIN_THREAD_ID: MaybeUninit<u32> = MaybeUninit::uninit();
+fn in_main_thread() -> bool {
+    unsafe { GetCurrentThreadId() == MAIN_THREAD_ID.assume_init() }
+}
+
 pub fn get_ticks_with_busy_wait() -> u64 {
     let mut state = STATE.lock().unwrap();
-    state.busy_wait_count += 1;
-    if state.busy_wait_count >= State::BUSY_WAIT_THRESHOLD {
-        drop(state);
-        sleep(State::TICKS_PER_SECOND / 60);
-        state = STATE.lock().unwrap();
-        state.busy_wait_count = 0;
+    if in_main_thread() {
+        state.busy_wait_count += 1;
+        if state.busy_wait_count >= State::BUSY_WAIT_THRESHOLD {
+            drop(state);
+            sleep(State::TICKS_PER_SECOND / 60);
+            state = STATE.lock().unwrap();
+            state.busy_wait_count = 0;
+        }
     }
     state.ticks
 }
 
 pub fn sleep(ticks: u64) {
+    if !in_main_thread() {
+        return;
+    }
+
     log!(LogLevel::Debug, "sleeping for {ticks} ticks");
 
     let mut remaining_ticks = ticks;

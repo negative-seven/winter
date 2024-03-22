@@ -173,6 +173,7 @@ pub enum NewSenderAndReceiverError {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConductorInitialMessage {
+    pub main_thread_id: u32,
     pub serialized_message_sender: [u8; 12],
     pub serialized_message_receiver: [u8; 12],
 }

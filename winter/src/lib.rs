@@ -45,6 +45,10 @@ impl Conductor {
         subprocess.inject_dll("hooks32.dll")?;
 
         let initial_message = bincode::serialize(&ConductorInitialMessage {
+            main_thread_id: subprocess
+                .iter_thread_ids()?
+                .next()
+                .expect("no threads in subprocess"),
             serialized_message_sender: unsafe { hooks_sender.leak_to_bytes() },
             serialized_message_receiver: unsafe { hooks_receiver.leak_to_bytes() },
         })?;
@@ -72,7 +76,6 @@ impl Conductor {
             let mut idle = idle.try_clone().unwrap();
             std::thread::spawn(move || loop {
                 match conductor_receiver.receive_blocking().unwrap() {
-                    HooksMessage::HooksInitialized => todo!(),
                     HooksMessage::Idle => idle.set().unwrap(),
                     HooksMessage::Stop => break,
                     HooksMessage::Log { level, message } => {
@@ -178,6 +181,7 @@ pub enum NewError {
     MessageReceive(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
     Bincode(#[from] bincode::Error),
+    IterThreadIds(#[from] process::IterThreadIdsError),
 }
 
 impl UnexpectedMessageError {

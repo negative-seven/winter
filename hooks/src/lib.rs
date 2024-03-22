@@ -9,7 +9,7 @@ use hooks::{
 };
 use minhook::MinHook;
 use shared::{
-    communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage},
+    communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::ManualResetEvent,
     process,
 };
@@ -125,10 +125,10 @@ fn hook_function(
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
-        let initial_message = std::ptr::read_unaligned(initial_message_pointer);
-        process::Process::get_current()
-            .free_memory(initial_message_pointer as usize)
-            .unwrap();
+    let initial_message = std::ptr::read_unaligned(initial_message_pointer);
+    process::Process::get_current()
+        .free_memory(initial_message_pointer as usize)
+        .unwrap();
     let mut message_receiver;
     MESSAGE_SENDER.write(Mutex::new(
         communication::Sender::<HooksMessage>::from_bytes(
@@ -138,7 +138,7 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
     message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
         initial_message.serialized_message_receiver,
     );
-
+    state::MAIN_THREAD_ID.write(initial_message.main_thread_id);
     EVENT_QUEUE.write(EventQueue::new());
 
     for (module_name, function_name, hook) in [
@@ -181,6 +181,11 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
         .unwrap()
         .send(&HooksMessage::HooksInitialized)
         .unwrap();
+    log!(
+        LogLevel::Debug,
+        "assuming thread with id 0x{:x} to be the main thread",
+        state::MAIN_THREAD_ID.assume_init_ref()
+    );
     loop {
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
         match message_receiver.receive_blocking().unwrap() {
