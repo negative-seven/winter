@@ -9,7 +9,7 @@ use hooks::{
 };
 use minhook::MinHook;
 use shared::{
-    communication::{self, ConductorMessage, HooksMessage},
+    communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage},
     event::ManualResetEvent,
     process,
 };
@@ -122,29 +122,24 @@ fn hook_function(
     Ok(())
 }
 
+#[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub extern "stdcall" fn initialize(serialized_sender_and_receiver_pointer: usize) {
+pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
+        let initial_message = std::ptr::read_unaligned(initial_message_pointer);
+        process::Process::get_current()
+            .free_memory(initial_message_pointer as usize)
+            .unwrap();
     let mut message_receiver;
-    unsafe {
-        MESSAGE_SENDER.write(Mutex::new(
-            communication::Sender::<HooksMessage>::from_bytes(
-                process::Process::get_current()
-                    .read_to_vec(serialized_sender_and_receiver_pointer, 12)
-                    .unwrap()
-                    .try_into()
-                    .unwrap(),
-            ),
-        ));
-        message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
-            process::Process::get_current()
-                .read_to_vec(serialized_sender_and_receiver_pointer + 12, 12)
-                .unwrap()
-                .try_into()
-                .unwrap(),
-        );
+    MESSAGE_SENDER.write(Mutex::new(
+        communication::Sender::<HooksMessage>::from_bytes(
+            initial_message.serialized_message_sender,
+        ),
+    ));
+    message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
+        initial_message.serialized_message_receiver,
+    );
 
-        EVENT_QUEUE.write(EventQueue::new());
-    }
+    EVENT_QUEUE.write(EventQueue::new());
 
     for (module_name, function_name, hook) in [
         (

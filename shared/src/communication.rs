@@ -172,6 +172,12 @@ pub enum NewSenderAndReceiverError {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct ConductorInitialMessage {
+    pub serialized_message_sender: [u8; 12],
+    pub serialized_message_receiver: [u8; 12],
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ConductorMessage {
     AdvanceTime(Duration),

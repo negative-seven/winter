@@ -1,6 +1,6 @@
 use anyhow::Result;
 use shared::{
-    communication::{self, ConductorMessage, HooksMessage, LogLevel},
+    communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::{self, ManualResetEvent},
     pipe, process, thread,
 };
@@ -44,22 +44,21 @@ impl Conductor {
         subprocess.kill_on_current_process_exit()?;
         subprocess.inject_dll("hooks32.dll")?;
 
-        let serialized_hooks_sender_and_receiver =
-            unsafe { [hooks_sender.leak_to_bytes(), hooks_receiver.leak_to_bytes()].concat() };
-        let serialized_hooks_sender_and_receiver_pointer = subprocess
-            .allocate_read_write_memory(serialized_hooks_sender_and_receiver.len())
+        let initial_message = bincode::serialize(&ConductorInitialMessage {
+            serialized_message_sender: unsafe { hooks_sender.leak_to_bytes() },
+            serialized_message_receiver: unsafe { hooks_receiver.leak_to_bytes() },
+        })?;
+        let initial_message_pointer = subprocess
+            .allocate_read_write_memory(initial_message.len())
             .map_err(NewError::ProcessAllocate)?;
         subprocess
-            .write(
-                serialized_hooks_sender_and_receiver_pointer,
-                &serialized_hooks_sender_and_receiver,
-            )
+            .write(initial_message_pointer, &initial_message)
             .map_err(NewError::ProcessWrite)?;
         subprocess
             .create_thread(
                 subprocess.get_export_address("hooks32.dll", "initialize")?,
                 false,
-                Some(serialized_hooks_sender_and_receiver_pointer as _),
+                Some(initial_message_pointer as _),
             )
             .map_err(NewError::ThreadCreate)?;
 
@@ -178,6 +177,7 @@ pub enum NewError {
     ThreadCreate(#[source] std::io::Error),
     MessageReceive(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
+    Bincode(#[from] bincode::Error),
 }
 
 impl UnexpectedMessageError {

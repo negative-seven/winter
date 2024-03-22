@@ -13,7 +13,7 @@ use winapi::{
     um::{
         handleapi::INVALID_HANDLE_VALUE,
         jobapi2::{AssignProcessToJobObject, SetInformationJobObject},
-        memoryapi::{ReadProcessMemory, VirtualAllocEx, WriteProcessMemory},
+        memoryapi::{ReadProcessMemory, VirtualAllocEx, VirtualFreeEx, WriteProcessMemory},
         processthreadsapi::{
             CreateProcessA, CreateRemoteThread, GetCurrentProcess, GetProcessId,
             PROCESS_INFORMATION, STARTUPINFOA,
@@ -31,7 +31,8 @@ use winapi::{
             JobObjectExtendedLimitInformation, IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER,
             IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER32,
             IMAGE_OPTIONAL_HEADER64, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, PAGE_EXECUTE_READ, PAGE_READWRITE,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, MEM_RELEASE, PAGE_EXECUTE_READ,
+            PAGE_READWRITE,
         },
     },
 };
@@ -200,6 +201,16 @@ impl Process {
         }
 
         Ok(pointer)
+    }
+
+    #[instrument(ret(level = Level::DEBUG), err)]
+    pub fn free_memory(&self, address: usize) -> Result<(), io::Error> {
+        unsafe {
+            if VirtualFreeEx(self.handle.as_raw(), address as *mut c_void, 0, MEM_RELEASE) == 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+        Ok(())
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]
