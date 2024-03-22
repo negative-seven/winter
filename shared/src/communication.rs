@@ -181,6 +181,7 @@ pub struct ConductorInitialMessage {
 #[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum ConductorMessage {
+    Resume,
     AdvanceTime(Duration),
     SetKeyState { id: u8, state: bool },
     IdleRequest,

@@ -11,7 +11,7 @@ use minhook::MinHook;
 use shared::{
     communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::ManualResetEvent,
-    process,
+    process, thread,
 };
 use static_init::dynamic;
 use std::{
@@ -190,6 +190,17 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
         match message_receiver.receive_blocking().unwrap() {
             #[allow(clippy::cast_possible_truncation)]
+            ConductorMessage::Resume => {
+                for thread in process::Process::get_current()
+                    .iter_thread_ids()
+                    .unwrap()
+                    .map(thread::Thread::from_id)
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
+                {
+                    thread.resume().unwrap();
+                }
+            }
             ConductorMessage::AdvanceTime(duration) => {
                 event_queue.enqueue(Event::AdvanceTime(duration));
             }

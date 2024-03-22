@@ -2,7 +2,7 @@ use anyhow::Result;
 use shared::{
     communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::{self, ManualResetEvent},
-    pipe, process, thread,
+    pipe, process,
 };
 use std::{io::Read, thread::JoinHandle, time::Duration};
 use thiserror::Error;
@@ -106,16 +106,8 @@ impl Conductor {
         })
     }
 
-    pub fn resume(&self) -> Result<(), ResumeError> {
-        for thread in self
-            .process
-            .iter_thread_ids()?
-            .map(thread::Thread::from_id)
-            .collect::<Result<Vec<_>, _>>()?
-        {
-            thread.resume()?;
-        }
-
+    pub fn resume(&mut self) -> Result<(), ResumeError> {
+        self.message_sender.send(&ConductorMessage::Resume)?;
         Ok(())
     }
 
@@ -194,15 +186,13 @@ impl UnexpectedMessageError {
 #[derive(Debug, Error)]
 #[error("error occurred while resuming")]
 pub enum ResumeError {
-    IterThreadIds(#[from] process::IterThreadIdsError),
-    ThreadFromId(#[from] thread::FromIdError),
-    ThreadResume(#[from] thread::ResumeError),
+    MessageSend(#[from] communication::SendError),
 }
 
 #[derive(Debug, Error)]
 #[error("error occurred while setting key state")]
 pub enum SetKeyStateError {
-    TransceiverSend(#[from] communication::SendError),
+    MessageSend(#[from] communication::SendError),
 }
 
 #[derive(Debug, Error)]
