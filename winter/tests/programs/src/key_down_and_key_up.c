@@ -30,10 +30,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR comman
         wc.lpszClassName,
         "",
         0,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
+        -10000,
+        -10000,
+        0,
+        0,
         NULL,
         NULL,
         instance,
@@ -42,6 +42,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR comman
     {
         return 1;
     }
+    ShowWindow(window, SW_SHOW);
 
     for (int i = 0; i < 100; i++)
     {
