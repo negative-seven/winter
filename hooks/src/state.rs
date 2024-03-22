@@ -11,7 +11,10 @@ use winapi::{
     },
     um::{
         processthreadsapi::GetCurrentThreadId,
-        winuser::{EnumThreadWindows, IsWindowVisible, MSG, WM_KEYDOWN, WM_KEYUP},
+        winuser::{
+            self, EnumThreadWindows, IsWindowVisible, MSG, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
+            VK_RCONTROL, VK_RMENU, VK_RSHIFT, WM_KEYDOWN, WM_KEYUP,
+        },
     },
 };
 
@@ -24,13 +27,35 @@ pub struct State {
     ticks: u64,
     pending_ticks: u64,
     busy_wait_count: u64,
-    pub key_states: [bool; 256],
+    key_states: [bool; 256],
     pub custom_message_queue: VecDeque<MSGSend>,
 }
 
 impl State {
     pub const TICKS_PER_SECOND: u64 = 3000;
     const BUSY_WAIT_THRESHOLD: u64 = 100;
+
+    pub fn get_key_state(&self, key_code: u8) -> bool {
+        #[allow(clippy::cast_possible_truncation)]
+        const VK_SHIFT: u8 = winuser::VK_SHIFT as u8;
+        #[allow(clippy::cast_possible_truncation)]
+        const VK_CONTROL: u8 = winuser::VK_CONTROL as u8;
+        #[allow(clippy::cast_possible_truncation)]
+        const VK_MENU: u8 = winuser::VK_MENU as u8;
+
+        match key_code {
+            VK_SHIFT => self.key_states[VK_LSHIFT as usize] || self.key_states[VK_RSHIFT as usize],
+            VK_CONTROL => {
+                self.key_states[VK_LCONTROL as usize] || self.key_states[VK_RCONTROL as usize]
+            }
+            VK_MENU => self.key_states[VK_LMENU as usize] || self.key_states[VK_RMENU as usize],
+            key_code => self.key_states[usize::from(key_code)],
+        }
+    }
+
+    pub fn set_key_state(&mut self, key_code: u8, state: bool) {
+        self.key_states[usize::from(key_code)] = state;
+    }
 }
 
 pub static STATE: Mutex<State> = Mutex::new(State {
@@ -98,15 +123,12 @@ pub fn sleep(ticks: u64) {
                     id: key_id,
                     state: key_state,
                 } => {
-                    let key_previous_state = std::mem::replace(
-                        STATE
-                            .lock()
-                            .unwrap()
-                            .key_states
-                            .get_mut(usize::from(key_id))
-                            .unwrap(),
-                        key_state,
-                    );
+                    let key_previous_state;
+                    {
+                        let mut state = STATE.lock().unwrap();
+                        key_previous_state = state.get_key_state(key_id);
+                        state.set_key_state(key_id, key_state);
+                    }
                     for thread_id in process::Process::get_current().iter_thread_ids().unwrap() {
                         unsafe extern "system" fn callback(window: HWND, message: isize) -> i32 {
                             if window != NULL.cast() && IsWindowVisible(window) == 0 {

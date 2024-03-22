@@ -11,13 +11,14 @@ pub extern "system" fn get_keyboard_state(key_states: *mut u8) {
     let state = STATE.lock().unwrap();
     for i in 0u8..=255u8 {
         unsafe {
-            *(key_states.offset(isize::from(i))) = u8::from(state.key_states[usize::from(i)]) << 7;
+            *(key_states.offset(isize::from(i))) = u8::from(state.get_key_state(i)) << 7;
         }
     }
 }
 
+#[allow(clippy::cast_possible_truncation)]
 pub extern "system" fn get_key_state(id: u32) -> u16 {
-    u16::from(STATE.lock().unwrap().key_states[id as usize]) << 15
+    u16::from(STATE.lock().unwrap().get_key_state(id as u8)) << 15
 }
 
 pub extern "system" fn get_async_key_state(id: u32) -> u16 {
