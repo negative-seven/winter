@@ -111,12 +111,11 @@ pub fn sleep(ticks: u64) {
             let event = event_queue.dequeue_blocking();
             match event {
                 #[allow(clippy::cast_possible_truncation)]
+                #[allow(clippy::cast_precision_loss)]
+                #[allow(clippy::cast_sign_loss)]
                 Event::AdvanceTime(duration) => {
-                    STATE.lock().unwrap().pending_ticks += (duration.as_nanos()
-                        * u128::from(State::TICKS_PER_SECOND)
-                        / std::time::Duration::from_secs(1).as_nanos())
-                        as u64;
-
+                    STATE.lock().unwrap().pending_ticks +=
+                        (duration.as_secs_f64() * State::TICKS_PER_SECOND as f64).round() as u64;
                     break;
                 }
                 Event::SetKeyState {
