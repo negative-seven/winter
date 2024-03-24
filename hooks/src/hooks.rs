@@ -1,13 +1,89 @@
-use crate::{
-    get_trampoline,
-    state::{self, State, STATE},
-};
+use crate::state::{self, State, STATE};
+use minhook::MinHook;
+use std::{collections::BTreeMap, sync::RwLock};
 use winapi::{
+    ctypes::c_void,
     shared::{ntdef::NULL, windef::HWND},
     um::winuser::{MSG, PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP},
 };
 
-pub extern "system" fn get_keyboard_state(key_states: *mut u8) {
+static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTreeMap::new());
+
+fn get_trampoline(function_name: impl AsRef<str>) -> *const c_void {
+    *TRAMPOLINES
+        .read()
+        .unwrap()
+        .get(function_name.as_ref())
+        .unwrap() as *const c_void
+}
+
+fn set_trampoline(name: impl AsRef<str>, pointer: usize) {
+    TRAMPOLINES
+        .write()
+        .unwrap()
+        .insert(name.as_ref().to_string(), pointer);
+}
+
+pub fn initialize() {
+    for (module_name, function_name, hook) in [
+        (
+            "user32.dll",
+            "GetKeyboardState",
+            get_keyboard_state as *const c_void,
+        ),
+        ("user32.dll", "GetKeyState", get_key_state as *const c_void),
+        (
+            "user32.dll",
+            "GetAsyncKeyState",
+            get_async_key_state as *const c_void,
+        ),
+        ("kernel32.dll", "Sleep", sleep as *const c_void),
+        ("user32.dll", "PeekMessageA", peek_message as *const c_void),
+        (
+            "kernel32.dll",
+            "GetTickCount",
+            get_tick_count as *const c_void,
+        ),
+        (
+            "kernel32.dll",
+            "GetTickCount64",
+            get_tick_count_64 as *const c_void,
+        ),
+        ("winmm.dll", "timeGetTime", time_get_time as *const c_void),
+        (
+            "kernel32.dll",
+            "QueryPerformanceFrequency",
+            query_performance_frequency as *const c_void,
+        ),
+        (
+            "kernel32.dll",
+            "QueryPerformanceCounter",
+            query_performance_counter as *const c_void,
+        ),
+    ] {
+        fn hook_function(
+            module_name: &str,
+            function_name: &str,
+            hook: *const c_void,
+        ) -> Result<(), Box<dyn std::error::Error>> {
+            let process = shared::process::Process::get_current();
+            let function_address = process.get_export_address(module_name, function_name)?;
+            unsafe {
+                let original_function = MinHook::create_hook(
+                    function_address as *mut std::ffi::c_void,
+                    hook as *mut std::ffi::c_void,
+                )
+                .unwrap();
+                MinHook::enable_hook(function_address as *mut std::ffi::c_void).unwrap();
+                set_trampoline(function_name, original_function as usize);
+            }
+            Ok(())
+        }
+        let _ = hook_function(module_name, function_name, hook);
+    }
+}
+
+extern "system" fn get_keyboard_state(key_states: *mut u8) {
     let state = STATE.lock().unwrap();
     for i in 0u8..=255u8 {
         unsafe {
@@ -17,15 +93,15 @@ pub extern "system" fn get_keyboard_state(key_states: *mut u8) {
 }
 
 #[allow(clippy::cast_possible_truncation)]
-pub extern "system" fn get_key_state(id: u32) -> u16 {
+extern "system" fn get_key_state(id: u32) -> u16 {
     u16::from(STATE.lock().unwrap().get_key_state(id as u8)) << 15
 }
 
-pub extern "system" fn get_async_key_state(id: u32) -> u16 {
+extern "system" fn get_async_key_state(id: u32) -> u16 {
     get_key_state(id)
 }
 
-pub extern "system" fn sleep(milliseconds: u32) {
+extern "system" fn sleep(milliseconds: u32) {
     state::sleep(u64::from(milliseconds) * State::TICKS_PER_SECOND / 1000);
     unsafe {
         let trampoline: extern "system" fn(u32) = std::mem::transmute(get_trampoline("Sleep"));
@@ -33,7 +109,7 @@ pub extern "system" fn sleep(milliseconds: u32) {
     }
 }
 
-pub unsafe extern "system" fn peek_message(
+unsafe extern "system" fn peek_message(
     message: *mut MSG,
     window_filter: HWND,
     minimum_id_filter: u32,
@@ -83,23 +159,23 @@ pub unsafe extern "system" fn peek_message(
 }
 
 #[allow(clippy::cast_possible_truncation)]
-pub extern "system" fn get_tick_count() -> u32 {
+extern "system" fn get_tick_count() -> u32 {
     (state::get_ticks_with_busy_wait() * 1000 / State::TICKS_PER_SECOND) as u32
 }
 
 #[allow(clippy::cast_possible_truncation)]
-pub extern "system" fn get_tick_count_64() -> u64 {
+extern "system" fn get_tick_count_64() -> u64 {
     (u128::from(state::get_ticks_with_busy_wait()) * 1000 / u128::from(State::TICKS_PER_SECOND))
         as u64
 }
 
-pub extern "system" fn time_get_time() -> u32 {
+extern "system" fn time_get_time() -> u32 {
     get_tick_count()
 }
 
 const SIMULATED_PERFORMANCE_COUNTER_FREQUENCY: u64 = 1 << 32;
 
-pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
+extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
     // due to pointer alignment issues, frequency must be split into two u32 chunks
 
     #[allow(clippy::cast_possible_truncation)]
@@ -111,7 +187,7 @@ pub extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
     1
 }
 
-pub extern "system" fn query_performance_counter(count: *mut u32) -> u32 {
+extern "system" fn query_performance_counter(count: *mut u32) -> u32 {
     // due to pointer alignment issues, count must be split into two u32 chunks
 
     #[allow(clippy::cast_possible_truncation)]
