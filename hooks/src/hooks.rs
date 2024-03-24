@@ -6,6 +6,7 @@ use winapi::{
     shared::{ntdef::NULL, windef::HWND},
     um::{
         synchapi::Sleep,
+        winnt::LARGE_INTEGER,
         winuser::{PeekMessageA, MSG, PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP},
     },
 };
@@ -93,21 +94,23 @@ pub fn initialize() {
     }
 }
 
-extern "system" fn get_keyboard_state(key_states: *mut u8) {
+unsafe extern "system" fn get_keyboard_state(key_states: *mut u8) -> i32 {
     let state = STATE.lock().unwrap();
     for i in 0u8..=255u8 {
         unsafe {
             *(key_states.offset(isize::from(i))) = u8::from(state.get_key_state(i)) << 7;
         }
     }
+    1
 }
 
 #[allow(clippy::cast_possible_truncation)]
-extern "system" fn get_key_state(id: u32) -> u16 {
-    u16::from(STATE.lock().unwrap().get_key_state(id as u8)) << 15
+#[allow(clippy::cast_sign_loss)]
+unsafe extern "system" fn get_key_state(id: i32) -> i16 {
+    i16::from(STATE.lock().unwrap().get_key_state(id as u8)) << 15
 }
 
-extern "system" fn get_async_key_state(id: u32) -> u16 {
+unsafe extern "system" fn get_async_key_state(id: i32) -> i16 {
     get_key_state(id)
 }
 
@@ -187,28 +190,22 @@ extern "system" fn time_get_time() -> u32 {
 
 const SIMULATED_PERFORMANCE_COUNTER_FREQUENCY: u64 = 1 << 32;
 
-extern "system" fn query_performance_frequency(frequency: *mut u32) -> u32 {
-    // due to pointer alignment issues, frequency must be split into two u32 chunks
-
-    #[allow(clippy::cast_possible_truncation)]
+unsafe extern "system" fn query_performance_frequency(frequency: *mut LARGE_INTEGER) -> i32 {
+    #[allow(clippy::cast_possible_wrap)]
     unsafe {
-        *frequency = SIMULATED_PERFORMANCE_COUNTER_FREQUENCY as u32;
-        *frequency.offset(1) = (SIMULATED_PERFORMANCE_COUNTER_FREQUENCY >> 32) as u32;
+        *(*frequency).QuadPart_mut() = SIMULATED_PERFORMANCE_COUNTER_FREQUENCY as i64;
     }
 
     1
 }
 
-extern "system" fn query_performance_counter(count: *mut u32) -> u32 {
-    // due to pointer alignment issues, count must be split into two u32 chunks
-
-    #[allow(clippy::cast_possible_truncation)]
+unsafe extern "system" fn query_performance_counter(count: *mut LARGE_INTEGER) -> i32 {
+    #[allow(clippy::cast_possible_wrap)]
     unsafe {
         let simulated_performance_counter = state::get_ticks_with_busy_wait()
             * SIMULATED_PERFORMANCE_COUNTER_FREQUENCY
             / State::TICKS_PER_SECOND;
-        *count = simulated_performance_counter as u32;
-        *count.offset(1) = (simulated_performance_counter >> 32) as u32;
+        *(*count).QuadPart_mut() = simulated_performance_counter as i64;
     }
 
     1
