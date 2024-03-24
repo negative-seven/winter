@@ -68,38 +68,43 @@ impl Default for EventQueue {
 static mut EVENT_QUEUE: MaybeUninit<EventQueue> = MaybeUninit::uninit();
 
 macro_rules! log {
-    ($level:expr, $($format_args:expr $(,)?),+) => {{
-        let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
-        message_sender
-            .lock()
-            .unwrap()
-            .send(&shared::communication::HooksMessage::Log {
-                level: $level,
-                message: format!($($format_args),+),
-            })
-            .unwrap();
-    }};
+    ($level:expr, $($format_args:expr $(,)?),+) => {
+        #[allow(unused_qualifications)]
+        {
+            let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
+            message_sender
+                .lock()
+                .unwrap()
+                .send(&shared::communication::HooksMessage::Log {
+                    level: $level,
+                    message: format!($($format_args),+),
+                })
+                .unwrap();
+        }
+    };
 }
 pub(crate) use log;
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
-    let initial_message = std::ptr::read_unaligned(initial_message_pointer);
-    process::Process::get_current()
-        .free_memory(initial_message_pointer as usize)
-        .unwrap();
     let mut message_receiver;
-    MESSAGE_SENDER.write(Mutex::new(
-        communication::Sender::<HooksMessage>::from_bytes(
-            initial_message.serialized_message_sender,
-        ),
-    ));
-    message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
-        initial_message.serialized_message_receiver,
-    );
-    state::MAIN_THREAD_ID.write(initial_message.main_thread_id);
-    EVENT_QUEUE.write(EventQueue::new());
+    unsafe {
+        let initial_message = std::ptr::read_unaligned(initial_message_pointer);
+        process::Process::get_current()
+            .free_memory(initial_message_pointer as usize)
+            .unwrap();
+        MESSAGE_SENDER.write(Mutex::new(
+            communication::Sender::<HooksMessage>::from_bytes(
+                initial_message.serialized_message_sender,
+            ),
+        ));
+        message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
+            initial_message.serialized_message_receiver,
+        );
+        state::MAIN_THREAD_ID.write(initial_message.main_thread_id);
+        EVENT_QUEUE.write(EventQueue::new());
+    }
 
     hooks::initialize();
 
@@ -112,7 +117,7 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
     log!(
         LogLevel::Debug,
         "assuming thread with id 0x{:x} to be the main thread",
-        state::MAIN_THREAD_ID.assume_init_ref()
+        unsafe { state::MAIN_THREAD_ID.assume_init_ref() }
     );
     loop {
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };

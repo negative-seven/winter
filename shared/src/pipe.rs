@@ -66,7 +66,7 @@ impl Writer {
 
     #[must_use]
     pub unsafe fn leak(self) -> *mut c_void {
-        self.handle.leak()
+        unsafe { self.handle.leak() }
     }
 }
 
@@ -120,7 +120,7 @@ impl Reader {
 
     #[must_use]
     pub unsafe fn leak(self) -> *mut c_void {
-        self.handle.leak()
+        unsafe { self.handle.leak() }
     }
 }
 

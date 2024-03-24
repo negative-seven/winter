@@ -19,23 +19,23 @@ use winapi::{
 };
 
 #[derive(Clone)]
-pub struct MSGSend(pub MSG);
+pub(crate) struct MSGSend(pub(crate) MSG);
 
 unsafe impl Send for MSGSend {}
 
-pub struct State {
+pub(crate) struct State {
     ticks: u64,
     pending_ticks: u64,
     busy_wait_count: u64,
     key_states: [bool; 256],
-    pub custom_message_queue: VecDeque<MSGSend>,
+    pub(crate) custom_message_queue: VecDeque<MSGSend>,
 }
 
 impl State {
-    pub const TICKS_PER_SECOND: u64 = 3000;
+    pub(crate) const TICKS_PER_SECOND: u64 = 3000;
     const BUSY_WAIT_THRESHOLD: u64 = 100;
 
-    pub fn get_key_state(&self, key_code: u8) -> bool {
+    pub(crate) fn get_key_state(&self, key_code: u8) -> bool {
         #[allow(clippy::cast_possible_truncation)]
         const VK_SHIFT: u8 = winuser::VK_SHIFT as u8;
         #[allow(clippy::cast_possible_truncation)]
@@ -53,12 +53,12 @@ impl State {
         }
     }
 
-    pub fn set_key_state(&mut self, key_code: u8, state: bool) {
+    pub(crate) fn set_key_state(&mut self, key_code: u8, state: bool) {
         self.key_states[usize::from(key_code)] = state;
     }
 }
 
-pub static STATE: Mutex<State> = Mutex::new(State {
+pub(crate) static STATE: Mutex<State> = Mutex::new(State {
     ticks: 0,
     pending_ticks: 0,
     busy_wait_count: 0,
@@ -66,12 +66,12 @@ pub static STATE: Mutex<State> = Mutex::new(State {
     custom_message_queue: VecDeque::new(),
 });
 
-pub static mut MAIN_THREAD_ID: MaybeUninit<u32> = MaybeUninit::uninit();
+pub(crate) static mut MAIN_THREAD_ID: MaybeUninit<u32> = MaybeUninit::uninit();
 fn in_main_thread() -> bool {
     unsafe { GetCurrentThreadId() == MAIN_THREAD_ID.assume_init() }
 }
 
-pub fn get_ticks_with_busy_wait() -> u64 {
+pub(crate) fn get_ticks_with_busy_wait() -> u64 {
     let mut state = STATE.lock().unwrap();
     if in_main_thread() {
         state.busy_wait_count += 1;
@@ -85,7 +85,7 @@ pub fn get_ticks_with_busy_wait() -> u64 {
     state.ticks
 }
 
-pub fn sleep(ticks: u64) {
+pub(crate) fn sleep(ticks: u64) {
     if !in_main_thread() {
         return;
     }
@@ -130,11 +130,11 @@ pub fn sleep(ticks: u64) {
                     }
                     for thread_id in process::Process::get_current().iter_thread_ids().unwrap() {
                         unsafe extern "system" fn callback(window: HWND, message: isize) -> i32 {
-                            if window != NULL.cast() && IsWindowVisible(window) == 0 {
+                            if window != NULL.cast() && unsafe { IsWindowVisible(window) } == 0 {
                                 return 1;
                             }
 
-                            let message = &mut *(message as *mut MSGSend);
+                            let message = unsafe { &mut *(message as *mut MSGSend) };
                             message.0.hwnd = window;
                             STATE
                                 .lock()

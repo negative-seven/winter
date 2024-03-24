@@ -41,25 +41,28 @@ fn set_trampoline(name: impl AsRef<str>, pointer: *const c_void) {
         .insert(name.as_ref().to_string(), pointer as usize);
 }
 
-pub fn initialize() {
+pub(crate) fn initialize() {
     macro_rules! hook {
-        ($module:expr, $original:expr, $new:expr, $type:ty $(,)?) => {{
-            #[allow(unused_assignments)]
-            #[allow(unused_variables)]
+        ($module:expr, $original:expr, $new:expr, $type:ty $(,)?) => {
+            #[allow(unused_qualifications)]
             {
-                let mut f: $type;
-                f = $original; // type check
-                f = $new; // type check
-            }
+                #[allow(unused_assignments)]
+                #[allow(unused_variables)]
+                {
+                    let mut f: $type;
+                    f = $original; // type check
+                    f = $new; // type check
+                }
 
-            (
-                $module,
-                stringify!($original)
-                    .rsplit_once("::")
-                    .map_or(stringify!($original), |(_, name)| name),
-                $new as *const winapi::ctypes::c_void,
-            )
-        }};
+                (
+                    $module,
+                    stringify!($original)
+                        .rsplit_once("::")
+                        .map_or(stringify!($original), |(_, name)| name),
+                    $new as *const winapi::ctypes::c_void,
+                )
+            }
+        };
     }
 
     for (module_name, function_name, hook) in [
@@ -137,7 +140,7 @@ pub fn initialize() {
             }
             Ok(())
         }
-        let _ = hook_function(module_name, function_name, hook);
+        let _unused_result = hook_function(module_name, function_name, hook);
     }
 }
 
@@ -158,7 +161,7 @@ unsafe extern "system" fn get_key_state(id: i32) -> i16 {
 }
 
 unsafe extern "system" fn get_async_key_state(id: i32) -> i16 {
-    get_key_state(id)
+    unsafe { get_key_state(id) }
 }
 
 extern "system" fn sleep(milliseconds: u32) {
@@ -194,7 +197,9 @@ unsafe extern "system" fn peek_message(
                 if !id_filter.contains(&custom_message.0.message) {
                     continue;
                 }
-                *message = custom_message.0;
+                unsafe {
+                    *message = custom_message.0;
+                }
                 if flags & PM_REMOVE != 0 {
                     state.custom_message_queue.remove(custom_message_index);
                 }
@@ -207,17 +212,19 @@ unsafe extern "system" fn peek_message(
         PeekMessageA,
         unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32
     );
-    let result = trampoline(
-        message,
-        window_filter,
-        minimum_id_filter,
-        maximum_id_filter,
-        flags,
-    );
-    if result != 0 && matches!((*message).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
-        (*message).message = 0;
+    unsafe {
+        let result = trampoline(
+            message,
+            window_filter,
+            minimum_id_filter,
+            maximum_id_filter,
+            flags,
+        );
+        if result != 0 && matches!((*message).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
+            (*message).message = 0;
+        }
+        result
     }
-    result
 }
 
 #[allow(clippy::cast_possible_truncation)]

@@ -46,26 +46,30 @@ impl<S: Serialize + Debug> Sender<S> {
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
     pub unsafe fn from_bytes(bytes: [u8; 12]) -> Self {
-        let mut handles = bytes
-            .chunks(4)
-            .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
+        unsafe {
+            let mut handles = bytes
+                .chunks(4)
+                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
 
-        Self {
-            pipe: pipe::Writer::new(handles.next().unwrap()),
-            send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-            acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-            _phantom_data: PhantomData,
+            Self {
+                pipe: pipe::Writer::new(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                _phantom_data: PhantomData,
+            }
         }
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
     pub unsafe fn leak_to_bytes(self) -> [u8; 12] {
-        let bytes = [
-            self.pipe.handle().as_raw() as u32,
-            self.send_event.handle().as_raw() as u32,
-            self.acknowledge_event.handle().as_raw() as u32,
-        ]
+        let bytes = unsafe {
+            [
+                self.pipe.handle().as_raw() as u32,
+                self.send_event.handle().as_raw() as u32,
+                self.acknowledge_event.handle().as_raw() as u32,
+            ]
+        }
         .iter()
         .flat_map(|h| h.to_ne_bytes())
         .collect::<Vec<_>>()
@@ -109,26 +113,30 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
     pub unsafe fn from_bytes(bytes: [u8; 12]) -> Self {
-        let mut handles = bytes
-            .chunks(4)
-            .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
+        unsafe {
+            let mut handles = bytes
+                .chunks(4)
+                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
 
-        Self {
-            pipe: pipe::Reader::new(handles.next().unwrap()),
-            send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-            acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-            _phantom_data: PhantomData,
+            Self {
+                pipe: pipe::Reader::new(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                _phantom_data: PhantomData,
+            }
         }
     }
 
     #[must_use]
     #[allow(clippy::missing_panics_doc)]
     pub unsafe fn leak_to_bytes(self) -> [u8; 12] {
-        let bytes = [
-            self.pipe.handle().as_raw() as u32,
-            self.send_event.handle().as_raw() as u32,
-            self.acknowledge_event.handle().as_raw() as u32,
-        ]
+        let bytes = unsafe {
+            [
+                self.pipe.handle().as_raw() as u32,
+                self.send_event.handle().as_raw() as u32,
+                self.acknowledge_event.handle().as_raw() as u32,
+            ]
+        }
         .iter()
         .flat_map(|h| h.to_ne_bytes())
         .collect::<Vec<_>>()

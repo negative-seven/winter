@@ -2,7 +2,6 @@ use crate::{handle::Handle, pipe, thread::Thread};
 use std::{
     ffi::{CStr, CString, NulError},
     io,
-    mem::{size_of, transmute},
     path::Path,
 };
 use thiserror::Error;
@@ -70,7 +69,7 @@ impl Process {
 
         #[allow(clippy::cast_possible_truncation)]
         let mut startup_info = STARTUPINFOA {
-            cb: size_of::<STARTUPINFOA>() as u32,
+            cb: std::mem::size_of::<STARTUPINFOA>() as u32,
             lpReserved: NULL.cast(),
             lpDesktop: NULL.cast(),
             lpTitle: NULL.cast(),
@@ -239,21 +238,24 @@ impl Process {
     pub unsafe fn read<T: Copy>(&self, address: usize) -> Result<T, io::Error> {
         use std::alloc::{alloc, dealloc, Layout};
 
-        let data = alloc(Layout::array::<T>(1).unwrap());
-        if ReadProcessMemory(
-            self.handle.as_raw(),
-            address as *mut c_void,
-            data.cast(),
-            std::mem::size_of::<T>(),
-            NULL.cast(),
-        ) == 0
-        {
+        unsafe {
+            let data = alloc(Layout::array::<T>(1).unwrap());
+            if ReadProcessMemory(
+                self.handle.as_raw(),
+                address as *mut c_void,
+                data.cast(),
+                std::mem::size_of::<T>(),
+                NULL.cast(),
+            ) == 0
+            {
+                dealloc(data, Layout::array::<T>(1).unwrap());
+                return Err(io::Error::last_os_error());
+            }
+            let result = *data.cast();
             dealloc(data, Layout::array::<T>(1).unwrap());
-            return Err(io::Error::last_os_error());
+
+            Ok(result)
         }
-        let result = *data.cast();
-        dealloc(data, Layout::array::<T>(1).unwrap());
-        Ok(result)
     }
 
     #[instrument(
@@ -350,7 +352,7 @@ impl Process {
                 self.handle.as_raw(),
                 NULL.cast(),
                 0,
-                Some(transmute(start_address)),
+                Some(std::mem::transmute(start_address)),
                 parameter.unwrap_or(NULL),
                 if suspended { CREATE_SUSPENDED } else { 0 },
                 NULL.cast(),
@@ -582,7 +584,7 @@ impl Iterator for ThreadIdIterator {
 
         let mut entry = THREADENTRY32 {
             #[allow(clippy::cast_possible_truncation)]
-            dwSize: size_of::<THREADENTRY32>() as u32,
+            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
             cntUsage: 0,
             th32ThreadID: 0,
             th32OwnerProcessID: 0,
@@ -658,7 +660,7 @@ impl Iterator for ModuleEntry32Iterator {
     fn next(&mut self) -> Option<Self::Item> {
         let mut me32 = MODULEENTRY32 {
             #[allow(clippy::cast_possible_truncation)]
-            dwSize: size_of::<MODULEENTRY32>() as u32,
+            dwSize: std::mem::size_of::<MODULEENTRY32>() as u32,
             th32ModuleID: 0,
             th32ProcessID: 0,
             GlblcntUsage: 0,

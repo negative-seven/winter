@@ -1,3 +1,22 @@
 [workspace]
 members = ["hooks", "shared", "winter"]
 resolver = "2"
+
+[workspace.lints.rust]
+absolute_paths_not_starting_with_crate = "warn"
+keyword_idents = "warn"
+let_underscore_drop = "warn"
+non_ascii_idents = "warn"
+trivial_numeric_casts = "warn"
+unit_bindings = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_extern_crates = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "warn"
+unused_qualifications = "warn"
+variant_size_differences = "warn"
+
+[workspace.lints.clippy]
+pedantic = "warn"
