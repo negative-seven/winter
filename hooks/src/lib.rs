@@ -4,8 +4,8 @@ mod hooks;
 mod state;
 
 use hooks::{
-    get_async_key_state, get_key_state, get_keyboard_state, get_tick_count, peek_message,
-    query_performance_counter, query_performance_frequency, sleep, time_get_time,
+    get_async_key_state, get_key_state, get_keyboard_state, get_tick_count, get_tick_count_64,
+    peek_message, query_performance_counter, query_performance_frequency, sleep, time_get_time,
 };
 use minhook::MinHook;
 use shared::{
@@ -159,6 +159,11 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
             "kernel32.dll",
             "GetTickCount",
             get_tick_count as *const c_void,
+        ),
+        (
+            "kernel32.dll",
+            "GetTickCount64",
+            get_tick_count_64 as *const c_void,
         ),
         ("winmm.dll", "timeGetTime", time_get_time as *const c_void),
         (

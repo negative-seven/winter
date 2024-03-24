@@ -87,6 +87,12 @@ pub extern "system" fn get_tick_count() -> u32 {
     (state::get_ticks_with_busy_wait() * 1000 / State::TICKS_PER_SECOND) as u32
 }
 
+#[allow(clippy::cast_possible_truncation)]
+pub extern "system" fn get_tick_count_64() -> u64 {
+    (u128::from(state::get_ticks_with_busy_wait()) * 1000 / u128::from(State::TICKS_PER_SECOND))
+        as u64
+}
+
 pub extern "system" fn time_get_time() -> u32 {
     get_tick_count()
 }

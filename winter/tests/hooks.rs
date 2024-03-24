@@ -130,6 +130,58 @@ fn get_tick_count_and_sleep() -> Result<()> {
 }
 
 #[test]
+fn get_tick_count_64() -> Result<()> {
+    init_test();
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/get_tick_count_64.exe",
+        &[
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+        ],
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+    assert_eq!(
+        stdout,
+        vec![
+            "0\r\n".repeat(99),
+            "16\r\n".repeat(100),
+            "33\r\n".to_string()
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn get_tick_count_64_and_sleep() -> Result<()> {
+    init_test();
+    let stdout = run_and_get_stdout(
+        "tests/programs/bin/get_tick_count_64_and_sleep.exe",
+        &[
+            &Event::AdvanceTime(Duration::from_millis(206)),
+            &Event::AdvanceTime(Duration::from_millis(1)),
+        ]
+        .repeat(10)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>(),
+    )?
+    .iter()
+    .map(|b| String::from_utf8_lossy(b).to_string())
+    .collect::<Vec<_>>();
+
+    let mut expected_stdout = Vec::new();
+    for index in 0..10 {
+        expected_stdout.push(format!("{}\r\n", index * 207));
+        expected_stdout.push(String::new());
+    }
+    expected_stdout.push(String::new());
+    assert_eq!(stdout, expected_stdout);
+    Ok(())
+}
+
+#[test]
 fn time_get_time() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
