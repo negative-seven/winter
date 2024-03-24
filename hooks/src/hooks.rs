@@ -4,24 +4,34 @@ use std::{collections::BTreeMap, sync::RwLock};
 use winapi::{
     ctypes::c_void,
     shared::{ntdef::NULL, windef::HWND},
-    um::winuser::{MSG, PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP},
+    um::{
+        synchapi::Sleep,
+        winuser::{PeekMessageA, MSG, PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP},
+    },
 };
 
 static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTreeMap::new());
 
-fn get_trampoline(function_name: impl AsRef<str>) -> *const c_void {
-    *TRAMPOLINES
-        .read()
-        .unwrap()
-        .get(function_name.as_ref())
-        .unwrap() as *const c_void
+macro_rules! get_trampoline {
+    ($name:expr, $type:ty) => {{
+        let mut f: $type;
+        #[allow(unused_assignments)]
+        {
+            f = $name; // type check
+        }
+        #[allow(unused_unsafe)]
+        unsafe {
+            f = std::mem::transmute(*TRAMPOLINES.read().unwrap().get(stringify!($name)).unwrap())
+        };
+        f
+    }};
 }
 
-fn set_trampoline(name: impl AsRef<str>, pointer: usize) {
+fn set_trampoline(name: impl AsRef<str>, pointer: *const c_void) {
     TRAMPOLINES
         .write()
         .unwrap()
-        .insert(name.as_ref().to_string(), pointer);
+        .insert(name.as_ref().to_string(), pointer as usize);
 }
 
 pub fn initialize() {
@@ -75,7 +85,7 @@ pub fn initialize() {
                 )
                 .unwrap();
                 MinHook::enable_hook(function_address as *mut std::ffi::c_void).unwrap();
-                set_trampoline(function_name, original_function as usize);
+                set_trampoline(function_name, original_function.cast());
             }
             Ok(())
         }
@@ -104,7 +114,7 @@ extern "system" fn get_async_key_state(id: u32) -> u16 {
 extern "system" fn sleep(milliseconds: u32) {
     state::sleep(u64::from(milliseconds) * State::TICKS_PER_SECOND / 1000);
     unsafe {
-        let trampoline: extern "system" fn(u32) = std::mem::transmute(get_trampoline("Sleep"));
+        let trampoline = get_trampoline!(Sleep, unsafe extern "system" fn(u32));
         trampoline(milliseconds);
     }
 }
@@ -115,7 +125,7 @@ unsafe extern "system" fn peek_message(
     minimum_id_filter: u32,
     maximum_id_filter: u32,
     flags: u32,
-) -> u32 {
+) -> i32 {
     {
         let mut state = STATE.lock().unwrap();
         if !state.custom_message_queue.is_empty() {
@@ -143,8 +153,10 @@ unsafe extern "system" fn peek_message(
         }
     }
 
-    let trampoline: extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> u32 =
-        std::mem::transmute(get_trampoline("PeekMessageA"));
+    let trampoline = get_trampoline!(
+        PeekMessageA,
+        unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32
+    );
     let result = trampoline(
         message,
         window_filter,
