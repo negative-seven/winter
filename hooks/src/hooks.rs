@@ -5,16 +5,22 @@ use winapi::{
     ctypes::c_void,
     shared::{ntdef::NULL, windef::HWND},
     um::{
+        profileapi::{QueryPerformanceCounter, QueryPerformanceFrequency},
         synchapi::Sleep,
+        sysinfoapi::{GetTickCount, GetTickCount64},
+        timeapi::timeGetTime,
         winnt::LARGE_INTEGER,
-        winuser::{PeekMessageA, MSG, PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP},
+        winuser::{
+            GetAsyncKeyState, GetKeyState, GetKeyboardState, PeekMessageA, MSG, PM_REMOVE, WM_CHAR,
+            WM_KEYDOWN, WM_KEYUP,
+        },
     },
 };
 
 static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTreeMap::new());
 
 macro_rules! get_trampoline {
-    ($name:expr, $type:ty) => {{
+    ($name:expr, $type:ty $(,)?) => {{
         let mut f: $type;
         #[allow(unused_assignments)]
         {
@@ -36,40 +42,81 @@ fn set_trampoline(name: impl AsRef<str>, pointer: *const c_void) {
 }
 
 pub fn initialize() {
+    macro_rules! hook {
+        ($module:expr, $original:expr, $new:expr, $type:ty $(,)?) => {{
+            #[allow(unused_assignments)]
+            #[allow(unused_variables)]
+            {
+                let mut f: $type;
+                f = $original; // type check
+                f = $new; // type check
+            }
+
+            (
+                $module,
+                stringify!($original)
+                    .rsplit_once("::")
+                    .map_or(stringify!($original), |(_, name)| name),
+                $new as *const winapi::ctypes::c_void,
+            )
+        }};
+    }
+
     for (module_name, function_name, hook) in [
-        (
+        hook!(
             "user32.dll",
-            "GetKeyboardState",
-            get_keyboard_state as *const c_void,
+            GetKeyboardState,
+            get_keyboard_state,
+            unsafe extern "system" fn(*mut u8) -> i32,
         ),
-        ("user32.dll", "GetKeyState", get_key_state as *const c_void),
-        (
+        hook!(
             "user32.dll",
-            "GetAsyncKeyState",
-            get_async_key_state as *const c_void,
+            GetKeyState,
+            get_key_state,
+            unsafe extern "system" fn(i32) -> i16,
         ),
-        ("kernel32.dll", "Sleep", sleep as *const c_void),
-        ("user32.dll", "PeekMessageA", peek_message as *const c_void),
-        (
-            "kernel32.dll",
-            "GetTickCount",
-            get_tick_count as *const c_void,
+        hook!(
+            "user32.dll",
+            GetAsyncKeyState,
+            get_async_key_state,
+            unsafe extern "system" fn(i32) -> i16,
         ),
-        (
-            "kernel32.dll",
-            "GetTickCount64",
-            get_tick_count_64 as *const c_void,
+        hook!("kernel32.dll", Sleep, sleep, unsafe extern "system" fn(u32)),
+        hook!(
+            "user32.dll",
+            PeekMessageA,
+            peek_message,
+            unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32,
         ),
-        ("winmm.dll", "timeGetTime", time_get_time as *const c_void),
-        (
+        hook!(
             "kernel32.dll",
-            "QueryPerformanceFrequency",
-            query_performance_frequency as *const c_void,
+            GetTickCount,
+            get_tick_count,
+            unsafe extern "system" fn() -> u32,
         ),
-        (
+        hook!(
             "kernel32.dll",
-            "QueryPerformanceCounter",
-            query_performance_counter as *const c_void,
+            GetTickCount64,
+            get_tick_count_64,
+            unsafe extern "system" fn() -> u64,
+        ),
+        hook!(
+            "winmm.dll",
+            timeGetTime,
+            time_get_time,
+            unsafe extern "system" fn() -> u32,
+        ),
+        hook!(
+            "kernel32.dll",
+            QueryPerformanceFrequency,
+            query_performance_frequency,
+            unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
+        ),
+        hook!(
+            "kernel32.dll",
+            QueryPerformanceCounter,
+            query_performance_counter,
+            unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
         ),
     ] {
         fn hook_function(
