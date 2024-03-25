@@ -24,13 +24,13 @@ fn main() -> Result<()> {
     if let Some(movie_path) = movie_path {
         for line in std::fs::read_to_string(movie_path)?.lines() {
             let mut tokens = line.split_ascii_whitespace();
-            match tokens.next().unwrap() {
-                "Key" => {
+            match tokens.next().unwrap().to_lowercase().as_str() {
+                "key" => {
                     let key_id = tokens.next().unwrap().parse::<u8>()?;
                     let key_state = tokens.next().unwrap().parse::<u8>()? != 0;
                     conductor.set_key_state(key_id, key_state)?;
                 }
-                "Wait" => {
+                "wait" => {
                     let secs = tokens.next().unwrap().parse::<f64>()?;
                     conductor.advance_time(Duration::from_secs_f64(secs))?;
                     conductor.wait_until_idle()?;
