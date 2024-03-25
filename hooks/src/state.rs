@@ -79,7 +79,6 @@ pub(crate) fn get_ticks_with_busy_wait() -> u64 {
             drop(state);
             sleep(State::TICKS_PER_SECOND / 60);
             state = STATE.lock().unwrap();
-            state.busy_wait_count = 0;
         }
     }
     state.ticks
@@ -103,6 +102,7 @@ pub(crate) fn sleep(ticks: u64) {
         }
 
         if remaining_ticks == 0 {
+            STATE.lock().unwrap().busy_wait_count = 0;
             break;
         }
 
