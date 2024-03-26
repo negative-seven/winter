@@ -1,34 +1,97 @@
 use anyhow::Result;
 use std::{
-    path::Path,
+    ffi::OsString,
+    path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, Mutex, Once},
+    str::FromStr,
+    sync::{Arc, Mutex, Once, OnceLock},
     time::Duration,
 };
 use tracing::info;
 
-#[allow(clippy::missing_panics_doc)]
-pub fn init_test() {
+fn init_test() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .init();
-
-        assert!(
-            std::env::var("VCVARS_DIR").map_or(false, |vcvars_dir| Path::exists(
-                &Path::new(&vcvars_dir).join("vcvars32.bat")
-            )),
-            "the environment variable VCVARS_DIR must be set to a directory containing vcvars scripts"
-        );
-
-        assert!(Command::new("tests/programs/build.bat")
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap()
-            .success());
     });
+}
+
+fn should_build(source_file_path: impl AsRef<Path>, binary_file_path: impl AsRef<Path>) -> bool {
+    let Ok(source_file_modified_time) = source_file_path
+        .as_ref()
+        .metadata()
+        .map(|m| m.modified().unwrap())
+    else {
+        return true;
+    };
+
+    let Ok(binary_file_modified_time) = binary_file_path
+        .as_ref()
+        .metadata()
+        .map(|m| m.modified().unwrap())
+    else {
+        return true;
+    };
+
+    binary_file_modified_time <= source_file_modified_time
+}
+
+fn build(program_name: impl AsRef<str>) -> PathBuf {
+    static ENVIRONMENT_VARIABLES: OnceLock<Vec<(OsString, OsString)>> = OnceLock::new();
+
+    let source_file_path = PathBuf::from(format!("tests/programs/src/{}.c", program_name.as_ref()));
+    let binary_file_path =
+        PathBuf::from(format!("tests/programs/bin/{}.exe", program_name.as_ref()));
+    if !should_build(&source_file_path, &binary_file_path) {
+        return binary_file_path;
+    }
+
+    let environment_variables = ENVIRONMENT_VARIABLES.get_or_init(|| {
+        const VCVARS_DIR_ERROR: &str = "the environment variable VCVARS_DIR must be set to a \
+            directory containing vcvars scripts to successfully build tests";
+
+        let vcvars_script_path =
+            Path::new(&std::env::var("VCVARS_DIR").expect(VCVARS_DIR_ERROR)).join("vcvars32.bat");
+        assert!(vcvars_script_path.exists(), "{}", VCVARS_DIR_ERROR);
+
+        let command = Command::new("cmd")
+            .arg("/C")
+            .arg(vcvars_script_path)
+            .args([">NUL", "&&", "set"])
+            .output()
+            .unwrap();
+        eprint!("{}", String::from_utf8_lossy(&command.stderr));
+        assert!(command.status.success());
+        let stdout = String::from_utf8(command.stdout).unwrap();
+        stdout
+            .lines()
+            .map(|line| {
+                let (key, value) = line.split_once('=').unwrap();
+                let key = OsString::from_str(key).unwrap();
+                let value = OsString::from_str(value).unwrap();
+                (key, value)
+            })
+            .collect::<Vec<_>>()
+    });
+
+    std::fs::create_dir_all("tests/programs/obj").unwrap();
+    std::fs::create_dir_all("tests/programs/bin").unwrap();
+    let command_output = Command::new("cl")
+        .envs(environment_variables.clone())
+        .arg(source_file_path)
+        .arg("user32.lib")
+        .arg("winmm.lib")
+        .args(["/Fo:", "tests/programs/obj/"])
+        .args(["/Fe:", "tests/programs/bin/"])
+        .output()
+        .unwrap();
+    print!("{}", String::from_utf8_lossy(&command_output.stdout));
+    eprint!("{}", String::from_utf8_lossy(&command_output.stderr));
+    assert!(command_output.status.success());
+
+    binary_file_path
 }
 
 #[derive(Clone)]
@@ -37,7 +100,7 @@ enum Event {
     SetKeyState { id: u8, state: bool },
 }
 
-fn run_and_get_stdout(executable_path: &str, events: &[Event]) -> Result<Vec<Vec<u8>>> {
+fn run_and_get_stdout(executable_path: impl AsRef<Path>, events: &[Event]) -> Result<Vec<Vec<u8>>> {
     let stdout = Arc::new(Mutex::new(Vec::new()));
     let stdout_callback = {
         let stdout = Arc::clone(&stdout);
@@ -50,7 +113,10 @@ fn run_and_get_stdout(executable_path: &str, events: &[Event]) -> Result<Vec<Vec
         }
     };
     let mut stdout_by_instant = Vec::new();
-    let mut conductor = winter::Conductor::new(executable_path, Some(stdout_callback))?;
+    let mut conductor = winter::Conductor::new(
+        executable_path.as_ref().to_str().unwrap(),
+        Some(stdout_callback),
+    )?;
     conductor.resume()?;
     for event in events {
         match event {
@@ -72,7 +138,7 @@ fn run_and_get_stdout(executable_path: &str, events: &[Event]) -> Result<Vec<Vec
 #[test]
 fn stdout() -> Result<()> {
     init_test();
-    let stdout = run_and_get_stdout("tests/programs/bin/stdout.exe", &[])?;
+    let stdout = run_and_get_stdout(build("stdout"), &[])?;
     assert_eq!(stdout, vec![b"abcABC123!\"_\x99\xaa\xbb"]);
     Ok(())
 }
@@ -81,7 +147,7 @@ fn stdout() -> Result<()> {
 fn get_tick_count() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/get_tick_count.exe",
+        build("get_tick_count"),
         &[
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
@@ -105,7 +171,7 @@ fn get_tick_count() -> Result<()> {
 fn get_tick_count_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/get_tick_count_and_sleep.exe",
+        build("get_tick_count_and_sleep"),
         &[
             &Event::AdvanceTime(Duration::from_millis(78)),
             &Event::AdvanceTime(Duration::from_millis(1)),
@@ -133,7 +199,7 @@ fn get_tick_count_and_sleep() -> Result<()> {
 fn get_tick_count_64() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/get_tick_count_64.exe",
+        build("get_tick_count_64"),
         &[
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
@@ -157,7 +223,7 @@ fn get_tick_count_64() -> Result<()> {
 fn get_tick_count_64_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/get_tick_count_64_and_sleep.exe",
+        build("get_tick_count_64_and_sleep"),
         &[
             &Event::AdvanceTime(Duration::from_millis(206)),
             &Event::AdvanceTime(Duration::from_millis(1)),
@@ -185,7 +251,7 @@ fn get_tick_count_64_and_sleep() -> Result<()> {
 fn time_get_time() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/time_get_time.exe",
+        build("time_get_time"),
         &[
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
@@ -209,7 +275,7 @@ fn time_get_time() -> Result<()> {
 fn time_get_time_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/time_get_time_and_sleep.exe",
+        build("time_get_time_and_sleep"),
         &[
             &Event::AdvanceTime(Duration::from_millis(40)),
             &Event::AdvanceTime(Duration::from_millis(1)),
@@ -237,7 +303,7 @@ fn time_get_time_and_sleep() -> Result<()> {
 fn query_performance_counter() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/query_performance_counter.exe",
+        build("query_performance_counter"),
         &[
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
@@ -263,7 +329,7 @@ fn query_performance_counter() -> Result<()> {
 fn query_performance_counter_and_sleep() -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/query_performance_counter_and_sleep.exe",
+        build("query_performance_counter_and_sleep"),
         &[
             &Event::AdvanceTime(Duration::from_millis(46)),
             &Event::AdvanceTime(Duration::from_millis(1)),
@@ -293,7 +359,7 @@ fn query_performance_counter_and_sleep() -> Result<()> {
     Ok(())
 }
 
-fn helper_for_key_state_tests(executable_path: &str) -> Result<()> {
+fn helper_for_key_state_tests(executable_path: impl AsRef<Path>) -> Result<()> {
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
     }
@@ -344,17 +410,17 @@ fn helper_for_key_state_tests(executable_path: &str) -> Result<()> {
 
 #[test]
 fn get_key_state() -> Result<()> {
-    helper_for_key_state_tests("tests/programs/bin/get_key_state.exe")
+    helper_for_key_state_tests(build("get_key_state"))
 }
 
 #[test]
 fn get_async_key_state() -> Result<()> {
-    helper_for_key_state_tests("tests/programs/bin/get_async_key_state.exe")
+    helper_for_key_state_tests(build("get_async_key_state"))
 }
 
 #[test]
 fn get_keyboard_state() -> Result<()> {
-    helper_for_key_state_tests("tests/programs/bin/get_keyboard_state.exe")
+    helper_for_key_state_tests(build("get_keyboard_state"))
 }
 
 #[test]
@@ -365,7 +431,7 @@ fn key_down_and_key_up() -> Result<()> {
 
     init_test();
     let stdout = run_and_get_stdout(
-        "tests/programs/bin/key_down_and_key_up.exe",
+        build("key_down_and_key_up"),
         &[
             key_event(65, true),
             key_event(65, true),
