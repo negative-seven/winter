@@ -2,7 +2,8 @@ use anyhow::Result;
 use shared::{
     communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::{self, ManualResetEvent},
-    pipe, process,
+    pipe,
+    process::{self, CheckIs64BitError},
 };
 use std::{io::Read, thread::JoinHandle, time::Duration};
 use thiserror::Error;
@@ -42,7 +43,13 @@ impl Conductor {
             None,
         )?;
         subprocess.kill_on_current_process_exit()?;
-        subprocess.inject_dll("hooks32.dll")?;
+
+        let hooks_library = if subprocess.is_64_bit()? {
+            "hooks64.dll"
+        } else {
+            "hooks32.dll"
+        };
+        subprocess.inject_dll(hooks_library)?;
 
         let initial_message = bincode::serialize(&ConductorInitialMessage {
             main_thread_id: subprocess
@@ -60,7 +67,7 @@ impl Conductor {
             .map_err(NewError::ProcessWrite)?;
         subprocess
             .create_thread(
-                subprocess.get_export_address("hooks32.dll", "initialize")?,
+                subprocess.get_export_address(hooks_library, "initialize")?,
                 false,
                 Some(initial_message_pointer as _),
             )
@@ -163,6 +170,7 @@ pub enum NewError {
     NewSenderAndReceiver(#[from] communication::NewSenderAndReceiverError),
     MessageSenderClone(#[from] communication::SenderCloneError),
     ProcessCreate(#[from] process::CreateError),
+    CheckIs64Bit(#[from] CheckIs64BitError),
     KillOnCurrentProcessExit(#[from] process::KillOnCurrentProcessExitError),
     InjectDll(#[from] process::InjectDllError),
     ProcessAllocate(#[source] std::io::Error),

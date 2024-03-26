@@ -28,11 +28,13 @@ use winapi::{
         },
         winnt::{
             JobObjectExtendedLimitInformation, IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER,
-            IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_OPTIONAL_HEADER32,
-            IMAGE_OPTIONAL_HEADER64, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_FILE_MACHINE_AMD64,
+            IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_IA64, IMAGE_FILE_MACHINE_UNKNOWN,
+            IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, MEM_RELEASE, PAGE_EXECUTE_READ,
             PAGE_READWRITE,
         },
+        wow64apiset::IsWow64Process2,
     },
 };
 
@@ -129,6 +131,30 @@ impl Process {
     #[must_use]
     pub unsafe fn handle(&self) -> &Handle {
         &self.handle
+    }
+
+    pub fn is_64_bit(&self) -> Result<bool, CheckIs64BitError> {
+        let mut process_wow64_machine = 0;
+        let mut system_machine = 0;
+        unsafe {
+            IsWow64Process2(
+                self.handle.as_raw(),
+                &mut process_wow64_machine,
+                &mut system_machine,
+            );
+        }
+
+        let machine = if process_wow64_machine == IMAGE_FILE_MACHINE_UNKNOWN {
+            system_machine
+        } else {
+            process_wow64_machine
+        };
+
+        Ok(match machine {
+            IMAGE_FILE_MACHINE_I386 => false,
+            IMAGE_FILE_MACHINE_AMD64 | IMAGE_FILE_MACHINE_IA64 => true,
+            _ => return Err(UnknownMachineError(machine).into()),
+        })
     }
 
     pub fn kill_on_current_process_exit(&self) -> Result<(), KillOnCurrentProcessExitError> {
@@ -695,6 +721,17 @@ pub enum CreateError {
     PathContainsNul(#[from] NulError),
     Os(#[from] io::Error),
 }
+
+#[derive(Debug, Error)]
+#[error("failed to determine whether process is 64-bit")]
+pub enum CheckIs64BitError {
+    Os(#[from] io::Error),
+    UnknownMachine(#[from] UnknownMachineError),
+}
+
+#[derive(Debug, Error)]
+#[error("unknown machine with id: 0x{:x}", .0)]
+pub struct UnknownMachineError(u16);
 
 #[derive(Debug, Error)]
 #[error("failed to set process to be killed on current process exit")]
