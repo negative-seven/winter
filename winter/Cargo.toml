@@ -13,3 +13,6 @@ thiserror = "1.0.38"
 tracing = "0.1.39"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 shared = { path = "../shared" }
+
+[dev-dependencies]
+test_utilities = { path = "tests/utilities" }
