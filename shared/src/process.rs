@@ -552,22 +552,55 @@ impl Process {
         debug!("write dll loading function");
         let load_library_a_pointer = self.get_export_address("kernel32.dll", "LoadLibraryA")?;
         let get_last_error_pointer = self.get_export_address("kernel32.dll", "GetLastError")?;
-        let mut load_dll_function = [
-            0x68, 0xcc, 0xcc, 0xcc, 0xcc, // push injected_dll_path_pointer
-            0xb8, 0xcc, 0xcc, 0xcc, 0xcc, // mov eax, load_library_a_pointer
-            0xff, 0xd0, // call eax
-            0x85, 0xc0, // test eax, eax
-            0xb8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0 (preserves ZF)
-            0x75, 0x07, // jne return
-            0xb8, 0xcc, 0xcc, 0xcc, 0xcc, // mov eax, get_last_error_pointer
-            0xff, 0xd0, // call eax
-            // return:
-            0xc3, // ret
-        ];
-        load_dll_function[1..5].copy_from_slice(&injected_dll_path_pointer.to_le_bytes()[..4]);
-        load_dll_function[6..10].copy_from_slice(&load_library_a_pointer.to_le_bytes()[..4]);
-        load_dll_function[22..26].copy_from_slice(&get_last_error_pointer.to_le_bytes()[..4]);
-        let load_dll_function_pointer = self.allocate_read_execute_memory(256)?;
+        let load_dll_function = {
+            if self.is_64_bit()? {
+                let mut function = vec![
+                    // special care must be taken to preserve the initial value of rsp and to
+                    // reserve 32 bytes of shadow store for LoadLibraryA, all while ensuring the
+                    // stack is aligned to a multiple of 16 bytes when calling LoadLibraryA
+                    0x48, 0x89, 0xe0, // mov rax, rsp
+                    0x48, 0x83, 0xe4, 0xf0, // and rsp, 0xfffffffffffffff0 (aligns stack)
+                    0x50, // push rax (misaligns stack)
+                    0x48, 0x83, 0xec, 0x28, // sub rsp, 0x28 (realigns stack)
+                    //
+                    0x48, 0xb9, 0, 0, 0, 0, 0, 0, 0, 0, // mov rcx, injected_dll_path_pointer
+                    0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, load_library_a_pointer
+                    0xff, 0xd0, // call rax
+                    0x48, 0x85, 0xc0, // test rax, rax
+                    0x48, 0xc7, 0xc0, 0x00, 0x00, 0x00, 0x00, // mov rax, 0 (preserves ZF)
+                    0x75, 0x0c, // jne return
+                    0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, get_last_error_pointer
+                    0xff, 0xd0, // call rax
+                    // return:
+                    0x48, 0x83, 0xc4, 0x28, // add rsp, 0x28
+                    0x5c, // pop rsp
+                    0xc3, // ret
+                ];
+                function[14..][..8].copy_from_slice(&injected_dll_path_pointer.to_le_bytes()[..8]);
+                function[24..][..8].copy_from_slice(&load_library_a_pointer.to_le_bytes()[..8]);
+                function[48..][..8].copy_from_slice(&get_last_error_pointer.to_le_bytes()[..8]);
+                function
+            } else {
+                let mut function = vec![
+                    0x68, 0, 0, 0, 0, // push injected_dll_path_pointer
+                    0xb8, 0, 0, 0, 0, // mov eax, load_library_a_pointer
+                    0xff, 0xd0, // call eax
+                    0x85, 0xc0, // test eax, eax
+                    0xb8, 0x00, 0x00, 0x00, 0x00, // mov eax, 0 (preserves ZF)
+                    0x75, 0x07, // jne return
+                    0xb8, 0, 0, 0, 0, // mov eax, get_last_error_pointer
+                    0xff, 0xd0, // call eax
+                    // return:
+                    0xc3, // ret
+                ];
+                function[1..][..4].copy_from_slice(&injected_dll_path_pointer.to_le_bytes()[..4]);
+                function[6..][..4].copy_from_slice(&load_library_a_pointer.to_le_bytes()[..4]);
+                function[22..][..4].copy_from_slice(&get_last_error_pointer.to_le_bytes()[..4]);
+                function
+            }
+        };
+        let load_dll_function_pointer =
+            self.allocate_read_execute_memory(load_dll_function.len())?;
         self.write(load_dll_function_pointer, &load_dll_function)?;
 
         debug!("run dll loading thread");
@@ -791,6 +824,7 @@ pub enum InjectDllError {
     GetExportAddress(#[from] GetExportAddressError),
     JoinThread(#[from] crate::thread::JoinError),
     LoadLibraryThread(#[from] LoadLibraryThreadError),
+    CheckIs64Bit(#[from] CheckIs64BitError),
     Os(#[from] io::Error),
 }
 
