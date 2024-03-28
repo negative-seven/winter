@@ -11,8 +11,8 @@ use winapi::{
         timeapi::timeGetTime,
         winnt::LARGE_INTEGER,
         winuser::{
-            GetAsyncKeyState, GetKeyState, GetKeyboardState, PeekMessageA, MSG, PM_REMOVE, WM_CHAR,
-            WM_KEYDOWN, WM_KEYUP,
+            GetAsyncKeyState, GetKeyState, GetKeyboardState, PeekMessageA, PeekMessageW, MSG,
+            PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP,
         },
     },
 };
@@ -41,87 +41,94 @@ fn set_trampoline(name: impl AsRef<str>, pointer: *const c_void) {
         .insert(name.as_ref().to_string(), pointer as usize);
 }
 
-pub(crate) fn initialize() {
-    macro_rules! hook {
-        ($module:expr, $original:expr, $new:expr, $type:ty $(,)?) => {
-            #[allow(unused_qualifications)]
+macro_rules! hook {
+    ($module:expr, $original:expr, $new:expr, $type:ty $(,)?) => {
+        #[allow(unused_qualifications)]
+        {
+            #[allow(unused_assignments)]
+            #[allow(unused_variables)]
             {
-                #[allow(unused_assignments)]
-                #[allow(unused_variables)]
-                {
-                    let mut f: $type;
-                    f = $original; // type check
-                    f = $new; // type check
-                }
-
-                (
-                    $module,
-                    stringify!($original)
-                        .rsplit_once("::")
-                        .map_or(stringify!($original), |(_, name)| name),
-                    $new as *const winapi::ctypes::c_void,
-                )
+                let mut f: $type;
+                f = $original; // type check
+                f = $new; // type check
             }
-        };
-    }
 
-    for (module_name, function_name, hook) in [
-        hook!(
-            "user32.dll",
-            GetKeyboardState,
-            get_keyboard_state,
-            unsafe extern "system" fn(*mut u8) -> i32,
-        ),
-        hook!(
-            "user32.dll",
-            GetKeyState,
-            get_key_state,
-            unsafe extern "system" fn(i32) -> i16,
-        ),
-        hook!(
-            "user32.dll",
-            GetAsyncKeyState,
-            get_async_key_state,
-            unsafe extern "system" fn(i32) -> i16,
-        ),
-        hook!("kernel32.dll", Sleep, sleep, unsafe extern "system" fn(u32)),
-        hook!(
-            "user32.dll",
-            PeekMessageA,
-            peek_message,
-            unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32,
-        ),
-        hook!(
-            "kernel32.dll",
-            GetTickCount,
-            get_tick_count,
-            unsafe extern "system" fn() -> u32,
-        ),
-        hook!(
-            "kernel32.dll",
-            GetTickCount64,
-            get_tick_count_64,
-            unsafe extern "system" fn() -> u64,
-        ),
-        hook!(
-            "winmm.dll",
-            timeGetTime,
-            time_get_time,
-            unsafe extern "system" fn() -> u32,
-        ),
-        hook!(
-            "kernel32.dll",
-            QueryPerformanceFrequency,
-            query_performance_frequency,
-            unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
-        ),
-        hook!(
-            "kernel32.dll",
-            QueryPerformanceCounter,
-            query_performance_counter,
-            unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
-        ),
-    ] {
+            (
+                $module,
+                stringify!($original),
+                $new as *const winapi::ctypes::c_void,
+            )
+        }
+    };
+}
+
+const HOOKS: &[(&str, &str, *const c_void)] = &[
+    hook!(
+        "user32.dll",
+        GetKeyboardState,
+        get_keyboard_state,
+        unsafe extern "system" fn(*mut u8) -> i32,
+    ),
+    hook!(
+        "user32.dll",
+        GetKeyState,
+        get_key_state,
+        unsafe extern "system" fn(i32) -> i16,
+    ),
+    hook!(
+        "user32.dll",
+        GetAsyncKeyState,
+        get_async_key_state,
+        unsafe extern "system" fn(i32) -> i16,
+    ),
+    hook!("kernel32.dll", Sleep, sleep, unsafe extern "system" fn(u32)),
+    hook!(
+        "user32.dll",
+        PeekMessageA,
+        peek_message_a,
+        unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32,
+    ),
+    hook!(
+        "user32.dll",
+        PeekMessageW,
+        peek_message_w,
+        unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32,
+    ),
+    hook!(
+        "kernel32.dll",
+        GetTickCount,
+        get_tick_count,
+        unsafe extern "system" fn() -> u32,
+    ),
+    hook!(
+        "kernel32.dll",
+        GetTickCount64,
+        get_tick_count_64,
+        unsafe extern "system" fn() -> u64,
+    ),
+    hook!(
+        "winmm.dll",
+        timeGetTime,
+        time_get_time,
+        unsafe extern "system" fn() -> u32,
+    ),
+    hook!(
+        "kernel32.dll",
+        QueryPerformanceFrequency,
+        query_performance_frequency,
+        unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
+    ),
+    hook!(
+        "kernel32.dll",
+        QueryPerformanceCounter,
+        query_performance_counter,
+        unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
+    ),
+];
+
+#[allow(clippy::too_many_lines)] // TODO
+pub(crate) fn initialize() {
+    for (module_name, function_name, hook) in HOOKS {
         fn hook_function(
             module_name: &str,
             function_name: &str,
@@ -140,7 +147,7 @@ pub(crate) fn initialize() {
             }
             Ok(())
         }
-        let _unused_result = hook_function(module_name, function_name, hook);
+        let _unused_result = hook_function(module_name, function_name, *hook);
     }
 }
 
@@ -172,12 +179,51 @@ extern "system" fn sleep(milliseconds: u32) {
     }
 }
 
+unsafe extern "system" fn peek_message_a(
+    message: *mut MSG,
+    window_filter: HWND,
+    minimum_id_filter: u32,
+    maximum_id_filter: u32,
+    flags: u32,
+) -> i32 {
+    unsafe {
+        peek_message(
+            message,
+            window_filter,
+            minimum_id_filter,
+            maximum_id_filter,
+            flags,
+            false,
+        )
+    }
+}
+
+unsafe extern "system" fn peek_message_w(
+    message: *mut MSG,
+    window_filter: HWND,
+    minimum_id_filter: u32,
+    maximum_id_filter: u32,
+    flags: u32,
+) -> i32 {
+    unsafe {
+        peek_message(
+            message,
+            window_filter,
+            minimum_id_filter,
+            maximum_id_filter,
+            flags,
+            true,
+        )
+    }
+}
+
 unsafe extern "system" fn peek_message(
     message: *mut MSG,
     window_filter: HWND,
     minimum_id_filter: u32,
     maximum_id_filter: u32,
     flags: u32,
+    unicode_strings: bool,
 ) -> i32 {
     {
         let mut state = STATE.lock().unwrap();
@@ -208,10 +254,17 @@ unsafe extern "system" fn peek_message(
         }
     }
 
-    let trampoline = get_trampoline!(
-        PeekMessageA,
-        unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32
-    );
+    let trampoline = if unicode_strings {
+        get_trampoline!(
+            PeekMessageW,
+            unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32
+        )
+    } else {
+        get_trampoline!(
+            PeekMessageA,
+            unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32
+        )
+    };
     unsafe {
         let result = trampoline(
             message,
