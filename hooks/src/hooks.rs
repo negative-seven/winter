@@ -10,6 +10,7 @@ use winapi::{
         sysinfoapi::{GetTickCount, GetTickCount64},
         timeapi::timeGetTime,
         winnt::LARGE_INTEGER,
+        winsock2::{socket, INVALID_SOCKET},
         winuser::{
             GetAsyncKeyState, GetKeyState, GetKeyboardState, PeekMessageA, PeekMessageW, MSG,
             PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP,
@@ -123,6 +124,12 @@ const HOOKS: &[(&str, &str, *const c_void)] = &[
         QueryPerformanceCounter,
         query_performance_counter,
         unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
+    ),
+    hook!(
+        "ws2_32.dll",
+        socket,
+        socket_,
+        unsafe extern "system" fn(i32, i32, i32) -> usize,
     ),
 ];
 
@@ -316,4 +323,8 @@ unsafe extern "system" fn query_performance_counter(count: *mut LARGE_INTEGER) -
     }
 
     1
+}
+
+unsafe extern "system" fn socket_(_address_family: i32, _type: i32, _protocol: i32) -> usize {
+    INVALID_SOCKET
 }
