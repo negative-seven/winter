@@ -236,6 +236,118 @@ fn time_get_time_and_sleep() -> Result<()> {
 }
 
 #[test]
+fn get_system_time_as_file_time() -> Result<()> {
+    init_test();
+    for executable_path in build("get_system_time_as_file_time") {
+        let stdout = run_and_get_stdout(
+            executable_path,
+            &[
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+            ],
+        )?
+        .iter()
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .collect::<Vec<_>>();
+        assert_eq!(
+            stdout,
+            vec![
+                "0 0\r\n".repeat(99),
+                "0 166666\r\n".repeat(100),
+                "0 333333\r\n".to_string()
+            ]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn get_system_time_as_file_time_and_sleep() -> Result<()> {
+    init_test();
+    for executable_path in build("get_system_time_as_file_time_and_sleep") {
+        let stdout = run_and_get_stdout(
+            executable_path,
+            &[
+                &Event::AdvanceTime(Duration::from_millis(192)),
+                &Event::AdvanceTime(Duration::from_millis(1)),
+            ]
+            .repeat(10)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        )?
+        .iter()
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .collect::<Vec<_>>();
+
+        let mut expected_stdout = Vec::new();
+        for index in 0..10 {
+            expected_stdout.push(format!("0 {}\r\n", index * 1_930_000));
+            expected_stdout.push(String::new());
+        }
+        expected_stdout.push(String::new());
+        assert_eq!(stdout, expected_stdout);
+    }
+    Ok(())
+}
+
+#[test]
+fn get_system_time_precise_as_file_time() -> Result<()> {
+    init_test();
+    for executable_path in build("get_system_time_precise_as_file_time") {
+        let stdout = run_and_get_stdout(
+            executable_path,
+            &[
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+            ],
+        )?
+        .iter()
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .collect::<Vec<_>>();
+        assert_eq!(
+            stdout,
+            vec![
+                "0 0\r\n".repeat(99),
+                "0 166666\r\n".repeat(100),
+                "0 333333\r\n".to_string()
+            ]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn get_system_time_precise_as_file_time_and_sleep() -> Result<()> {
+    init_test();
+    for executable_path in build("get_system_time_precise_as_file_time_and_sleep") {
+        let stdout = run_and_get_stdout(
+            executable_path,
+            &[
+                &Event::AdvanceTime(Duration::from_millis(6)),
+                &Event::AdvanceTime(Duration::from_millis(1)),
+            ]
+            .repeat(10)
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>(),
+        )?
+        .iter()
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .collect::<Vec<_>>();
+
+        let mut expected_stdout = Vec::new();
+        for index in 0..10 {
+            expected_stdout.push(format!("0 {}\r\n", index * 70_000));
+            expected_stdout.push(String::new());
+        }
+        expected_stdout.push(String::new());
+        assert_eq!(stdout, expected_stdout);
+    }
+    Ok(())
+}
+
+#[test]
 fn query_performance_counter() -> Result<()> {
     init_test();
     for executable_path in build("query_performance_counter") {

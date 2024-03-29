@@ -3,11 +3,13 @@ use minhook::MinHook;
 use std::{collections::BTreeMap, sync::RwLock};
 use winapi::{
     ctypes::c_void,
-    shared::{ntdef::NULL, windef::HWND},
+    shared::{minwindef::FILETIME, ntdef::NULL, windef::HWND},
     um::{
         profileapi::{QueryPerformanceCounter, QueryPerformanceFrequency},
         synchapi::Sleep,
-        sysinfoapi::{GetTickCount, GetTickCount64},
+        sysinfoapi::{
+            GetSystemTimeAsFileTime, GetSystemTimePreciseAsFileTime, GetTickCount, GetTickCount64,
+        },
         timeapi::timeGetTime,
         winnt::LARGE_INTEGER,
         winsock2::{socket, INVALID_SOCKET},
@@ -124,6 +126,18 @@ const HOOKS: &[(&str, &str, *const c_void)] = &[
         QueryPerformanceCounter,
         query_performance_counter,
         unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
+    ),
+    hook!(
+        "kernel32.dll",
+        GetSystemTimeAsFileTime,
+        get_system_time_as_file_time,
+        unsafe extern "system" fn(*mut FILETIME),
+    ),
+    hook!(
+        "kernel32.dll",
+        GetSystemTimePreciseAsFileTime,
+        get_system_time_precise_as_file_time,
+        unsafe extern "system" fn(*mut FILETIME),
     ),
     hook!(
         "ws2_32.dll",
@@ -323,6 +337,22 @@ unsafe extern "system" fn query_performance_counter(count: *mut LARGE_INTEGER) -
     }
 
     1
+}
+
+unsafe extern "system" fn get_system_time_as_file_time(file_time: *mut FILETIME) {
+    #[allow(clippy::cast_possible_truncation)]
+    let one_hundred_nanosecond_intervals = (u128::from(state::get_ticks_with_busy_wait())
+        * 10_000_000
+        / u128::from(State::TICKS_PER_SECOND)) as u64;
+
+    unsafe {
+        (*file_time).dwLowDateTime = (one_hundred_nanosecond_intervals & ((1 << 32) - 1)) as u32;
+        (*file_time).dwHighDateTime = (one_hundred_nanosecond_intervals >> 32) as u32;
+    }
+}
+
+unsafe extern "system" fn get_system_time_precise_as_file_time(file_time: *mut FILETIME) {
+    unsafe { get_system_time_as_file_time(file_time) }
 }
 
 unsafe extern "system" fn socket_(_address_family: i32, _type: i32, _protocol: i32) -> usize {
