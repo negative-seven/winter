@@ -576,9 +576,9 @@ impl Process {
                     0x5c, // pop rsp
                     0xc3, // ret
                 ];
-                function[14..][..8].copy_from_slice(&injected_dll_path_pointer.to_le_bytes()[..8]);
-                function[24..][..8].copy_from_slice(&load_library_a_pointer.to_le_bytes()[..8]);
-                function[48..][..8].copy_from_slice(&get_last_error_pointer.to_le_bytes()[..8]);
+                function[14..][..8].copy_from_slice(&injected_dll_path_pointer.to_le_bytes());
+                function[24..][..8].copy_from_slice(&load_library_a_pointer.to_le_bytes());
+                function[48..][..8].copy_from_slice(&get_last_error_pointer.to_le_bytes());
                 function
             } else {
                 let mut function = vec![
