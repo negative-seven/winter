@@ -194,10 +194,6 @@ unsafe extern "system" fn get_async_key_state(id: i32) -> i16 {
 
 extern "system" fn sleep(milliseconds: u32) {
     state::sleep(u64::from(milliseconds) * State::TICKS_PER_SECOND / 1000);
-    unsafe {
-        let trampoline = get_trampoline!(Sleep, unsafe extern "system" fn(u32));
-        trampoline(milliseconds);
-    }
 }
 
 unsafe extern "system" fn peek_message_a(

@@ -1,5 +1,9 @@
 use anyhow::Result;
-use std::{env, time::Duration};
+use std::{
+    env,
+    thread::sleep,
+    time::{Duration, Instant},
+};
 use tracing::info;
 use winter::Conductor;
 
@@ -21,6 +25,19 @@ fn main() -> Result<()> {
         }),
     )?;
     conductor.resume()?;
+
+    let mut wait = {
+        let mut sleep_target = Instant::now();
+        move |conductor: &mut Conductor, duration| -> Result<(), anyhow::Error> {
+            let now = Instant::now();
+            conductor.advance_time(duration)?;
+            sleep_target += duration;
+            sleep_target = sleep_target.max(now.checked_sub(duration * 4).unwrap_or(now));
+            sleep(sleep_target - now);
+            conductor.wait_until_idle()?;
+            Ok(())
+        }
+    };
     if let Some(movie_path) = movie_path {
         for line in std::fs::read_to_string(movie_path)?.lines() {
             let mut tokens = line.split_ascii_whitespace();
@@ -31,17 +48,17 @@ fn main() -> Result<()> {
                     conductor.set_key_state(key_id, key_state)?;
                 }
                 "wait" => {
-                    let secs = tokens.next().unwrap().parse::<f64>()?;
-                    conductor.advance_time(Duration::from_secs_f64(secs))?;
-                    conductor.wait_until_idle()?;
+                    wait(
+                        &mut conductor,
+                        Duration::from_secs_f64(tokens.next().unwrap().parse::<f64>()?),
+                    )?;
                 }
                 _ => unimplemented!(),
             }
         }
     } else {
         loop {
-            conductor.advance_time(Duration::from_secs_f64(1.0 / 60.0))?;
-            conductor.wait_until_idle()?;
+            wait(&mut conductor, Duration::from_secs_f64(1.0 / 60.0))?;
         }
     }
 
