@@ -212,6 +212,11 @@ impl Process {
         }
     }
 
+    /// Returns an iterator over the IDs of all the threads that belong to the
+    /// process.
+    ///
+    /// Note that this method can be quite slow, as it internally fetches all
+    /// threads from all processes.
     pub fn iter_thread_ids(&self) -> Result<ThreadIdIterator, IterThreadIdsError> {
         Ok(ThreadIdIterator::new(self.get_id()?)?)
     }

@@ -1,8 +1,5 @@
 use crate::{log, Event, EVENT_QUEUE, MESSAGE_SENDER};
-use shared::{
-    communication::{HooksMessage, LogLevel},
-    process,
-};
+use shared::communication::{HooksMessage, LogLevel};
 use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex};
 use winapi::{
     shared::{
@@ -128,7 +125,8 @@ pub(crate) fn sleep(ticks: u64) {
                         key_previous_state = state.get_key_state(key_id);
                         state.set_key_state(key_id, key_state);
                     }
-                    for thread_id in process::Process::get_current().iter_thread_ids().unwrap() {
+
+                    {
                         unsafe extern "system" fn callback(window: HWND, message: isize) -> i32 {
                             if window != NULL.cast() && unsafe { IsWindowVisible(window) } == 0 {
                                 return 1;
@@ -148,7 +146,7 @@ pub(crate) fn sleep(ticks: u64) {
                         let time_in_ticks = STATE.lock().unwrap().ticks as u32;
                         unsafe {
                             EnumThreadWindows(
-                                thread_id,
+                                MAIN_THREAD_ID.assume_init(),
                                 Some(callback),
                                 &mut MSGSend(MSG {
                                     hwnd: NULL.cast(),
