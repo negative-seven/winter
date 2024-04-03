@@ -20,7 +20,7 @@ use winapi::{
     },
 };
 
-static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTreeMap::new());
+pub(crate) static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTreeMap::new());
 
 macro_rules! get_trampoline {
     ($name:expr, $type:ty $(,)?) => {{
@@ -30,12 +30,20 @@ macro_rules! get_trampoline {
             f = $name; // type check
         }
         #[allow(unused_unsafe)]
+        #[allow(unused_qualifications)]
         unsafe {
-            f = std::mem::transmute(*TRAMPOLINES.read().unwrap().get(stringify!($name)).unwrap())
+            f = std::mem::transmute(
+                *crate::hooks::TRAMPOLINES
+                    .read()
+                    .unwrap()
+                    .get(stringify!($name))
+                    .unwrap(),
+            )
         };
         f
     }};
 }
+pub(crate) use get_trampoline;
 
 fn set_trampoline(name: impl AsRef<str>, pointer: *const c_void) {
     TRAMPOLINES

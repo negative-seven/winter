@@ -1,4 +1,4 @@
-use crate::{log, Event, EVENT_QUEUE, MESSAGE_SENDER};
+use crate::{hooks, log, Event, EVENT_QUEUE, MESSAGE_SENDER};
 use shared::communication::{HooksMessage, LogLevel};
 use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex};
 use winapi::{
@@ -8,6 +8,7 @@ use winapi::{
     },
     um::{
         processthreadsapi::GetCurrentThreadId,
+        synchapi::Sleep,
         winuser::{
             self, EnumThreadWindows, IsWindowVisible, MSG, VK_LCONTROL, VK_LMENU, VK_LSHIFT,
             VK_RCONTROL, VK_RMENU, VK_RSHIFT, WM_KEYDOWN, WM_KEYUP,
@@ -83,6 +84,11 @@ pub(crate) fn get_ticks_with_busy_wait() -> u64 {
 
 pub(crate) fn sleep(ticks: u64) {
     if !in_main_thread() {
+        let sleep_trampoline = hooks::get_trampoline!(Sleep, unsafe extern "system" fn(u32));
+        unsafe {
+            #[allow(clippy::cast_possible_truncation)]
+            sleep_trampoline((ticks * 1000 / State::TICKS_PER_SECOND) as u32);
+        }
         return;
     }
 
