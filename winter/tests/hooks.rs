@@ -1,11 +1,11 @@
 use anyhow::Result;
-use futures::executor::block_on;
 use std::{
     path::Path,
     sync::{Arc, Mutex, Once},
     time::Duration,
 };
 use test_utilities::build;
+use tokio::test;
 use tracing::info;
 
 fn init_test() {
@@ -23,7 +23,10 @@ enum Event {
     SetKeyState { id: u8, state: bool },
 }
 
-fn run_and_get_stdout(executable_path: impl AsRef<Path>, events: &[Event]) -> Result<Vec<Vec<u8>>> {
+async fn run_and_get_stdout(
+    executable_path: impl AsRef<Path>,
+    events: &[Event],
+) -> Result<Vec<Vec<u8>>> {
     let stdout = Arc::new(Mutex::new(Vec::new()));
     let stdout_callback = {
         let stdout = Arc::clone(&stdout);
@@ -36,40 +39,41 @@ fn run_and_get_stdout(executable_path: impl AsRef<Path>, events: &[Event]) -> Re
         }
     };
     let mut stdout_by_instant = Vec::new();
-    let mut conductor = block_on(winter::Conductor::new(
+    let mut conductor = winter::Conductor::new(
         executable_path.as_ref().to_str().unwrap(),
         Some(stdout_callback),
-    ))?;
-    block_on(conductor.resume())?;
+    )
+    .await?;
+    conductor.resume().await?;
     for event in events {
         match event {
             Event::AdvanceTime(duration) => {
-                block_on(conductor.wait_until_idle())?;
+                conductor.wait_until_idle().await?;
                 stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
-                block_on(conductor.advance_time(*duration))?;
+                conductor.advance_time(*duration).await?;
             }
             Event::SetKeyState { id, state } => {
-                block_on(conductor.set_key_state(*id, *state))?;
+                conductor.set_key_state(*id, *state).await?;
             }
         }
     }
-    block_on(conductor.wait_until_exit())?; // TODO: check that process only exited after the last time advancement
+    conductor.wait_until_exit().await?; // TODO: check that process only exited after the last time advancement
     stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
     Ok(stdout_by_instant)
 }
 
 #[test]
-fn stdout() -> Result<()> {
+async fn stdout() -> Result<()> {
     init_test();
     for executable_path in build("stdout") {
-        let stdout = run_and_get_stdout(executable_path, &[])?;
+        let stdout = run_and_get_stdout(executable_path, &[]).await?;
         assert_eq!(stdout, vec![b"abcABC123!\"_\x99\xaa\xbb"]);
     }
     Ok(())
 }
 
 #[test]
-fn get_tick_count() -> Result<()> {
+async fn get_tick_count() -> Result<()> {
     init_test();
     for executable_path in build("get_tick_count") {
         let stdout = run_and_get_stdout(
@@ -78,7 +82,8 @@ fn get_tick_count() -> Result<()> {
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -95,7 +100,7 @@ fn get_tick_count() -> Result<()> {
 }
 
 #[test]
-fn get_tick_count_and_sleep() -> Result<()> {
+async fn get_tick_count_and_sleep() -> Result<()> {
     init_test();
     for executable_path in build("get_tick_count_and_sleep") {
         let stdout = run_and_get_stdout(
@@ -108,7 +113,8 @@ fn get_tick_count_and_sleep() -> Result<()> {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>(),
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -125,7 +131,7 @@ fn get_tick_count_and_sleep() -> Result<()> {
 }
 
 #[test]
-fn get_tick_count_64() -> Result<()> {
+async fn get_tick_count_64() -> Result<()> {
     init_test();
     for executable_path in build("get_tick_count_64") {
         let stdout = run_and_get_stdout(
@@ -134,7 +140,8 @@ fn get_tick_count_64() -> Result<()> {
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -151,7 +158,7 @@ fn get_tick_count_64() -> Result<()> {
 }
 
 #[test]
-fn get_tick_count_64_and_sleep() -> Result<()> {
+async fn get_tick_count_64_and_sleep() -> Result<()> {
     init_test();
     for executable_path in build("get_tick_count_64_and_sleep") {
         let stdout = run_and_get_stdout(
@@ -164,7 +171,8 @@ fn get_tick_count_64_and_sleep() -> Result<()> {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>(),
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -181,7 +189,7 @@ fn get_tick_count_64_and_sleep() -> Result<()> {
 }
 
 #[test]
-fn time_get_time() -> Result<()> {
+async fn time_get_time() -> Result<()> {
     init_test();
     for executable_path in build("time_get_time") {
         let stdout = run_and_get_stdout(
@@ -190,7 +198,8 @@ fn time_get_time() -> Result<()> {
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -207,7 +216,7 @@ fn time_get_time() -> Result<()> {
 }
 
 #[test]
-fn time_get_time_and_sleep() -> Result<()> {
+async fn time_get_time_and_sleep() -> Result<()> {
     init_test();
     for executable_path in build("time_get_time_and_sleep") {
         let stdout = run_and_get_stdout(
@@ -220,7 +229,8 @@ fn time_get_time_and_sleep() -> Result<()> {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>(),
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -237,7 +247,7 @@ fn time_get_time_and_sleep() -> Result<()> {
 }
 
 #[test]
-fn get_system_time_as_file_time() -> Result<()> {
+async fn get_system_time_as_file_time() -> Result<()> {
     init_test();
     for executable_path in build("get_system_time_as_file_time") {
         let stdout = run_and_get_stdout(
@@ -246,7 +256,8 @@ fn get_system_time_as_file_time() -> Result<()> {
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -263,7 +274,7 @@ fn get_system_time_as_file_time() -> Result<()> {
 }
 
 #[test]
-fn get_system_time_as_file_time_and_sleep() -> Result<()> {
+async fn get_system_time_as_file_time_and_sleep() -> Result<()> {
     init_test();
     for executable_path in build("get_system_time_as_file_time_and_sleep") {
         let stdout = run_and_get_stdout(
@@ -276,7 +287,8 @@ fn get_system_time_as_file_time_and_sleep() -> Result<()> {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>(),
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -293,7 +305,7 @@ fn get_system_time_as_file_time_and_sleep() -> Result<()> {
 }
 
 #[test]
-fn get_system_time_precise_as_file_time() -> Result<()> {
+async fn get_system_time_precise_as_file_time() -> Result<()> {
     init_test();
     for executable_path in build("get_system_time_precise_as_file_time") {
         let stdout = run_and_get_stdout(
@@ -302,7 +314,8 @@ fn get_system_time_precise_as_file_time() -> Result<()> {
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -319,7 +332,7 @@ fn get_system_time_precise_as_file_time() -> Result<()> {
 }
 
 #[test]
-fn get_system_time_precise_as_file_time_and_sleep() -> Result<()> {
+async fn get_system_time_precise_as_file_time_and_sleep() -> Result<()> {
     init_test();
     for executable_path in build("get_system_time_precise_as_file_time_and_sleep") {
         let stdout = run_and_get_stdout(
@@ -332,7 +345,8 @@ fn get_system_time_precise_as_file_time_and_sleep() -> Result<()> {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>(),
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -349,7 +363,7 @@ fn get_system_time_precise_as_file_time_and_sleep() -> Result<()> {
 }
 
 #[test]
-fn query_performance_counter() -> Result<()> {
+async fn query_performance_counter() -> Result<()> {
     init_test();
     for executable_path in build("query_performance_counter") {
         let stdout = run_and_get_stdout(
@@ -358,7 +372,8 @@ fn query_performance_counter() -> Result<()> {
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -378,7 +393,7 @@ fn query_performance_counter() -> Result<()> {
 }
 
 #[test]
-fn query_performance_counter_and_sleep() -> Result<()> {
+async fn query_performance_counter_and_sleep() -> Result<()> {
     init_test();
     for executable_path in build("query_performance_counter_and_sleep") {
         let stdout = run_and_get_stdout(
@@ -391,7 +406,8 @@ fn query_performance_counter_and_sleep() -> Result<()> {
             .into_iter()
             .cloned()
             .collect::<Vec<_>>(),
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -414,7 +430,7 @@ fn query_performance_counter_and_sleep() -> Result<()> {
     Ok(())
 }
 
-fn helper_for_key_state_tests(program_name: impl AsRef<str>) -> Result<()> {
+async fn helper_for_key_state_tests(program_name: impl AsRef<str>) -> Result<()> {
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
     }
@@ -446,7 +462,8 @@ fn helper_for_key_state_tests(program_name: impl AsRef<str>) -> Result<()> {
                 key_event(40, true),
                 Event::AdvanceTime(Duration::from_millis(20)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();
@@ -466,22 +483,22 @@ fn helper_for_key_state_tests(program_name: impl AsRef<str>) -> Result<()> {
 }
 
 #[test]
-fn get_key_state() -> Result<()> {
-    helper_for_key_state_tests("get_key_state")
+async fn get_key_state() -> Result<()> {
+    helper_for_key_state_tests("get_key_state").await
 }
 
 #[test]
-fn get_async_key_state() -> Result<()> {
-    helper_for_key_state_tests("get_async_key_state")
+async fn get_async_key_state() -> Result<()> {
+    helper_for_key_state_tests("get_async_key_state").await
 }
 
 #[test]
-fn get_keyboard_state() -> Result<()> {
-    helper_for_key_state_tests("get_keyboard_state")
+async fn get_keyboard_state() -> Result<()> {
+    helper_for_key_state_tests("get_keyboard_state").await
 }
 
 #[test]
-fn key_down_and_key_up() -> Result<()> {
+async fn key_down_and_key_up() -> Result<()> {
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
     }
@@ -513,7 +530,8 @@ fn key_down_and_key_up() -> Result<()> {
                 key_event(40, true),
                 Event::AdvanceTime(Duration::from_millis(3)),
             ],
-        )?
+        )
+        .await?
         .iter()
         .map(|b| String::from_utf8_lossy(b).to_string())
         .collect::<Vec<_>>();

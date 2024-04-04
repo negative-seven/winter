@@ -34,7 +34,6 @@ impl<S: Serialize + Debug> Sender<S> {
     }
 
     pub async fn send(&mut self, message: &S) -> Result<(), SendError> {
-        #[allow(clippy::cast_possible_truncation)]
         self.pipe.write_all(&bincode::serialize(&message)?)?;
         self.pipe.flush()?;
         self.send_event.set()?;

@@ -1,12 +1,11 @@
 use anyhow::Result;
-use futures::executor::block_on;
 use shared::{
     communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::{self, ManualResetEvent},
     pipe,
     process::{self, CheckIs64BitError},
 };
-use std::{io::Read, thread::JoinHandle, time::Duration};
+use std::{io::Read, time::Duration};
 use thiserror::Error;
 
 pub struct Conductor {
@@ -17,7 +16,7 @@ pub struct Conductor {
     message_sender: communication::Sender<ConductorMessage>,
     message_self_sender: communication::Sender<HooksMessage>,
     idle: ManualResetEvent,
-    receive_messages_thread: Option<JoinHandle<()>>,
+    receive_messages_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Conductor {
@@ -80,22 +79,24 @@ impl Conductor {
         }
 
         let idle = ManualResetEvent::new()?;
-        let receive_messages_thread = {
+        let receive_messages_task = {
             let mut idle = idle.try_clone().unwrap();
-            std::thread::spawn(move || loop {
-                match block_on(conductor_receiver.receive()).unwrap() {
-                    HooksMessage::Idle => idle.set().unwrap(),
-                    HooksMessage::Stop => break,
-                    HooksMessage::Log { level, message } => {
-                        match level {
-                            LogLevel::Trace => tracing::trace!(target: "hooks", message),
-                            LogLevel::Debug => tracing::debug!(target: "hooks", message),
-                            LogLevel::Info => tracing::info!(target: "hooks", message),
-                            LogLevel::Warning => tracing::warn!(target: "hooks", message),
-                            LogLevel::Error => tracing::error!(target: "hooks", message),
-                        };
+            tokio::spawn(async move {
+                loop {
+                    match conductor_receiver.receive().await.unwrap() {
+                        HooksMessage::Idle => idle.set().unwrap(),
+                        HooksMessage::Stop => break,
+                        HooksMessage::Log { level, message } => {
+                            match level {
+                                LogLevel::Trace => tracing::trace!(target: "hooks", message),
+                                LogLevel::Debug => tracing::debug!(target: "hooks", message),
+                                LogLevel::Info => tracing::info!(target: "hooks", message),
+                                LogLevel::Warning => tracing::warn!(target: "hooks", message),
+                                LogLevel::Error => tracing::error!(target: "hooks", message),
+                            };
+                        }
+                        message => unimplemented!("handle message {message:?}"),
                     }
-                    message => unimplemented!("handle message {message:?}"),
                 }
             })
         };
@@ -110,7 +111,7 @@ impl Conductor {
             message_sender: conductor_sender,
             message_self_sender: conductor_self_sender,
             idle,
-            receive_messages_thread: Some(receive_messages_thread),
+            receive_messages_task: Some(receive_messages_task),
         })
     }
 
@@ -147,8 +148,8 @@ impl Conductor {
         self.process.join().await?;
         self.check_stdout();
         self.message_self_sender.send(&HooksMessage::Stop).await?;
-        if let Some(thread) = self.receive_messages_thread.take() {
-            thread.join().map_err(|_| WaitUntilExitError::ThreadJoin)?;
+        if let Some(task) = self.receive_messages_task.take() {
+            task.abort();
         }
         Ok(())
     }
@@ -227,5 +228,4 @@ pub enum WaitUntilIdleError {
 pub enum WaitUntilExitError {
     ProcessJoin(#[from] process::JoinError),
     MessageSend(#[from] communication::SendError),
-    ThreadJoin,
 }

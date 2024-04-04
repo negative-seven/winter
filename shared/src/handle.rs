@@ -3,16 +3,17 @@ use std::{
     future::Future,
     io,
     pin::Pin,
+    sync::{Arc, Mutex},
     task::{Context, Poll, Waker},
 };
 use thiserror::Error;
 use winapi::{
     ctypes::c_void,
-    shared::{minwindef::TRUE, ntdef::NULL},
+    shared::{minwindef::TRUE, ntdef::NULL, winerror::ERROR_IO_PENDING},
     um::{
         handleapi::{CloseHandle, DuplicateHandle},
         winbase::{RegisterWaitForSingleObject, UnregisterWait, INFINITE},
-        winnt::{DUPLICATE_SAME_ACCESS, WT_EXECUTEONLYONCE},
+        winnt::{DUPLICATE_SAME_ACCESS, WT_EXECUTEINWAITTHREAD, WT_EXECUTEONLYONCE},
     },
 };
 
@@ -57,30 +58,35 @@ impl Handle {
     }
 
     pub async fn wait(&self) -> Result<(), WaitError> {
-        struct WaitFuture {
-            handle: Handle,
-            /// A special handle that is not wrapped in the Handle type, as it
-            /// does not need to be explicitly closed with CloseHandle
-            wait_handle: Option<*mut c_void>,
+        struct WaitFutureState {
+            wait_handle: Option<WaitHandle>,
             completed: bool,
             waker: Option<Waker>,
+        }
+
+        struct WaitFuture {
+            handle: Handle,
+            state: Arc<Mutex<WaitFutureState>>,
         }
 
         impl WaitFuture {
             fn new(handle: Handle) -> Self {
                 Self {
                     handle,
-                    wait_handle: None,
-                    completed: false,
-                    waker: None,
+                    state: Arc::new(Mutex::new(WaitFutureState {
+                        wait_handle: None,
+                        completed: false,
+                        waker: None,
+                    })),
                 }
             }
 
             unsafe extern "system" fn callback(this: *mut c_void, _: u8) {
-                let this = this.cast::<WaitFuture>();
-                unsafe {
-                    (*this).completed = true;
-                    std::mem::take(&mut (*this).waker).unwrap().wake();
+                let state = unsafe { Box::from_raw(this.cast::<Arc<Mutex<WaitFutureState>>>()) };
+                let mut state = state.lock().unwrap();
+                state.completed = true;
+                if let Some(waker) = std::mem::take(&mut state.waker) {
+                    waker.wake();
                 }
             }
         }
@@ -88,34 +94,36 @@ impl Handle {
         impl Future for WaitFuture {
             type Output = ();
 
-            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-                if self.completed {
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                let mut state = self.state.lock().unwrap();
+                if state.completed {
                     Poll::Ready(())
                 } else {
-                    self.waker = Some(cx.waker().clone());
-                    unsafe {
-                        let mut wait_handle = NULL;
-                        RegisterWaitForSingleObject(
-                            &mut wait_handle,
-                            self.handle.as_raw(),
-                            Some(WaitFuture::callback),
-                            std::ptr::addr_of_mut!(*self).cast(),
-                            INFINITE,
-                            WT_EXECUTEONLYONCE,
-                        );
-                        self.wait_handle = Some(wait_handle);
+                    state.waker = Some(cx.waker().clone());
+                    if state.wait_handle.is_none() {
+                        unsafe {
+                            let mut wait_handle = NULL;
+                            let state_clone = Box::new(Arc::clone(&self.state));
+                            if RegisterWaitForSingleObject(
+                                &mut wait_handle,
+                                self.handle.as_raw(),
+                                Some(WaitFuture::callback),
+                                Box::into_raw(state_clone).cast(),
+                                INFINITE,
+                                WT_EXECUTEONLYONCE | WT_EXECUTEINWAITTHREAD,
+                            ) == 0
+                            {
+                                let last_os_error = io::Error::last_os_error();
+                                panic!(
+                                    "failed to register wait callback for handle {:p}: {}",
+                                    self.handle.as_raw(),
+                                    last_os_error,
+                                );
+                            }
+                            state.wait_handle = Some(WaitHandle::from_raw(wait_handle));
+                        }
                     }
                     Poll::Pending
-                }
-            }
-        }
-
-        impl Drop for WaitFuture {
-            fn drop(&mut self) {
-                if let Some(wait_handle) = self.wait_handle {
-                    unsafe {
-                        UnregisterWait(wait_handle);
-                    }
                 }
             }
         }
@@ -131,13 +139,46 @@ impl Drop for Handle {
         unsafe {
             if CloseHandle(self.0) == 0 {
                 let last_os_error = io::Error::last_os_error();
-                panic!("failed to drop handle {:?}: {}", self.0, last_os_error,);
+                panic!("failed to drop handle {:p}: {}", self.0, last_os_error);
             }
         }
     }
 }
 
 unsafe impl Send for Handle {}
+unsafe impl Sync for Handle {}
+
+struct WaitHandle(*mut c_void);
+
+impl WaitHandle {
+    unsafe fn from_raw(raw_handle: *mut c_void) -> Self {
+        Self(raw_handle)
+    }
+
+    #[must_use]
+    unsafe fn as_raw(&self) -> *mut c_void {
+        self.0
+    }
+}
+
+impl Drop for WaitHandle {
+    fn drop(&mut self) {
+        unsafe {
+            if UnregisterWait(self.as_raw()) == 0 {
+                let last_os_error = io::Error::last_os_error();
+                assert!(
+                    last_os_error.raw_os_error() == Some(ERROR_IO_PENDING as i32),
+                    "failed to unregister wait handle {:p}: {}",
+                    self.as_raw(),
+                    last_os_error,
+                );
+            }
+        }
+    }
+}
+
+unsafe impl Send for WaitHandle {}
+unsafe impl Sync for WaitHandle {}
 
 #[derive(Debug, Error)]
 #[error("failed to clone handle")]

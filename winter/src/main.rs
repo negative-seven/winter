@@ -7,11 +7,8 @@ use std::{
 use tracing::info;
 use winter::Conductor;
 
-fn main() -> Result<()> {
-    futures::executor::block_on(main_async())
-}
-
-async fn main_async() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
