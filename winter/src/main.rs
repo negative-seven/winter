@@ -31,20 +31,7 @@ async fn main_async() -> Result<()> {
     .await?;
     conductor.resume().await?;
 
-    let mut wait = {
-        let mut sleep_target = Instant::now();
-        move |conductor: &mut Conductor, duration| -> Result<(), anyhow::Error> {
-            futures::executor::block_on(async {
-                let now = Instant::now();
-                conductor.advance_time(duration).await?;
-                sleep_target += duration;
-                sleep_target = sleep_target.max(now.checked_sub(duration * 4).unwrap_or(now));
-                sleep(sleep_target - now);
-                conductor.wait_until_idle().await?;
-                Ok(())
-            })
-        }
-    };
+    let mut sleep_target = Instant::now();
     if let Some(movie_path) = movie_path {
         for line in std::fs::read_to_string(movie_path)?.lines() {
             let mut tokens = line.split_ascii_whitespace();
@@ -58,16 +45,35 @@ async fn main_async() -> Result<()> {
                     wait(
                         &mut conductor,
                         Duration::from_secs_f64(tokens.next().unwrap().parse::<f64>()?),
-                    )?;
+                        &mut sleep_target,
+                    )
+                    .await?;
                 }
                 _ => unimplemented!(),
             }
         }
-    } else {
-        loop {
-            wait(&mut conductor, Duration::from_secs_f64(1.0 / 60.0))?;
-        }
     }
 
+    loop {
+        wait(
+            &mut conductor,
+            Duration::from_secs_f64(1.0 / 60.0),
+            &mut sleep_target,
+        )
+        .await?;
+    }
+}
+
+async fn wait(
+    conductor: &mut Conductor,
+    duration: Duration,
+    sleep_target: &mut Instant,
+) -> Result<()> {
+    let now = Instant::now();
+    conductor.advance_time(duration).await?;
+    *sleep_target += duration;
+    *sleep_target = (*sleep_target).max(now.checked_sub(duration * 4).unwrap_or(now));
+    sleep(*sleep_target - now);
+    conductor.wait_until_idle().await?;
     Ok(())
 }
