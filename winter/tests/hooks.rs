@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::executor::block_on;
 use std::{
     path::Path,
     sync::{Arc, Mutex, Once},
@@ -35,24 +36,24 @@ fn run_and_get_stdout(executable_path: impl AsRef<Path>, events: &[Event]) -> Re
         }
     };
     let mut stdout_by_instant = Vec::new();
-    let mut conductor = winter::Conductor::new(
+    let mut conductor = block_on(winter::Conductor::new(
         executable_path.as_ref().to_str().unwrap(),
         Some(stdout_callback),
-    )?;
-    conductor.resume()?;
+    ))?;
+    block_on(conductor.resume())?;
     for event in events {
         match event {
             Event::AdvanceTime(duration) => {
-                conductor.wait_until_idle()?;
+                block_on(conductor.wait_until_idle())?;
                 stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
-                conductor.advance_time(*duration)?;
+                block_on(conductor.advance_time(*duration))?;
             }
             Event::SetKeyState { id, state } => {
-                conductor.set_key_state(*id, *state)?;
+                block_on(conductor.set_key_state(*id, *state))?;
             }
         }
     }
-    conductor.wait_until_exit()?; // TODO: check that process only exited after the last time advancement
+    block_on(conductor.wait_until_exit())?; // TODO: check that process only exited after the last time advancement
     stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
     Ok(stdout_by_instant)
 }

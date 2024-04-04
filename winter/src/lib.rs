@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::executor::block_on;
 use shared::{
     communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::{self, ManualResetEvent},
@@ -20,7 +21,7 @@ pub struct Conductor {
 }
 
 impl Conductor {
-    pub fn new<F>(
+    pub async fn new<F>(
         executable_path: impl AsRef<str>,
         stdout_callback: Option<F>,
     ) -> Result<Self, NewError>
@@ -49,7 +50,7 @@ impl Conductor {
         } else {
             "hooks32.dll"
         };
-        subprocess.inject_dll(hooks_library)?;
+        subprocess.inject_dll(hooks_library).await?;
 
         let initial_message = bincode::serialize(&ConductorInitialMessage {
             main_thread_id: subprocess
@@ -73,7 +74,7 @@ impl Conductor {
             )
             .map_err(NewError::ThreadCreate)?;
 
-        match conductor_receiver.receive_blocking()? {
+        match conductor_receiver.receive().await? {
             HooksMessage::HooksInitialized => (),
             message => return Err(UnexpectedMessageError::new(message).into()),
         }
@@ -82,7 +83,7 @@ impl Conductor {
         let receive_messages_thread = {
             let mut idle = idle.try_clone().unwrap();
             std::thread::spawn(move || loop {
-                match conductor_receiver.receive_blocking().unwrap() {
+                match block_on(conductor_receiver.receive()).unwrap() {
                     HooksMessage::Idle => idle.set().unwrap(),
                     HooksMessage::Stop => break,
                     HooksMessage::Log { level, message } => {
@@ -113,35 +114,39 @@ impl Conductor {
         })
     }
 
-    pub fn resume(&mut self) -> Result<(), ResumeError> {
-        self.message_sender.send(&ConductorMessage::Resume)?;
+    pub async fn resume(&mut self) -> Result<(), ResumeError> {
+        self.message_sender.send(&ConductorMessage::Resume).await?;
         Ok(())
     }
 
-    pub fn set_key_state(&mut self, id: u8, state: bool) -> Result<(), SetKeyStateError> {
+    pub async fn set_key_state(&mut self, id: u8, state: bool) -> Result<(), SetKeyStateError> {
         self.message_sender
-            .send(&ConductorMessage::SetKeyState { id, state })?;
+            .send(&ConductorMessage::SetKeyState { id, state })
+            .await?;
         Ok(())
     }
 
-    pub fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
+    pub async fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
         self.message_sender
-            .send(&ConductorMessage::AdvanceTime(time))?;
+            .send(&ConductorMessage::AdvanceTime(time))
+            .await?;
         Ok(())
     }
 
-    pub fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
+    pub async fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
         self.idle.reset()?;
-        self.message_sender.send(&ConductorMessage::IdleRequest)?;
-        self.idle.wait()?;
+        self.message_sender
+            .send(&ConductorMessage::IdleRequest)
+            .await?;
+        self.idle.wait().await?;
         self.check_stdout();
         Ok(())
     }
 
-    pub fn wait_until_exit(&mut self) -> Result<(), WaitUntilExitError> {
-        self.process.join()?;
+    pub async fn wait_until_exit(&mut self) -> Result<(), WaitUntilExitError> {
+        self.process.join().await?;
         self.check_stdout();
-        self.message_self_sender.send(&HooksMessage::Stop)?;
+        self.message_self_sender.send(&HooksMessage::Stop).await?;
         if let Some(thread) = self.receive_messages_thread.take() {
             thread.join().map_err(|_| WaitUntilExitError::ThreadJoin)?;
         }

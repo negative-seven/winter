@@ -1,12 +1,18 @@
 use crate::process;
-use std::io;
+use std::{
+    future::Future,
+    io,
+    pin::Pin,
+    task::{Context, Poll, Waker},
+};
 use thiserror::Error;
 use winapi::{
     ctypes::c_void,
     shared::{minwindef::TRUE, ntdef::NULL},
     um::{
         handleapi::{CloseHandle, DuplicateHandle},
-        winnt::DUPLICATE_SAME_ACCESS,
+        winbase::{RegisterWaitForSingleObject, UnregisterWait, INFINITE},
+        winnt::{DUPLICATE_SAME_ACCESS, WT_EXECUTEONLYONCE},
     },
 };
 
@@ -49,6 +55,75 @@ impl Handle {
             Ok(Self::from_raw(duplicated_handle))
         }
     }
+
+    pub async fn wait(&self) -> Result<(), WaitError> {
+        struct WaitFuture {
+            handle: Handle,
+            /// A special handle that is not wrapped in the Handle type, as it
+            /// does not need to be explicitly closed with CloseHandle
+            wait_handle: Option<*mut c_void>,
+            completed: bool,
+            waker: Option<Waker>,
+        }
+
+        impl WaitFuture {
+            fn new(handle: Handle) -> Self {
+                Self {
+                    handle,
+                    wait_handle: None,
+                    completed: false,
+                    waker: None,
+                }
+            }
+
+            unsafe extern "system" fn callback(this: *mut c_void, _: u8) {
+                let this = this.cast::<WaitFuture>();
+                unsafe {
+                    (*this).completed = true;
+                    std::mem::take(&mut (*this).waker).unwrap().wake();
+                }
+            }
+        }
+
+        impl Future for WaitFuture {
+            type Output = ();
+
+            fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+                if self.completed {
+                    Poll::Ready(())
+                } else {
+                    self.waker = Some(cx.waker().clone());
+                    unsafe {
+                        let mut wait_handle = NULL;
+                        RegisterWaitForSingleObject(
+                            &mut wait_handle,
+                            self.handle.as_raw(),
+                            Some(WaitFuture::callback),
+                            std::ptr::addr_of_mut!(*self).cast(),
+                            INFINITE,
+                            WT_EXECUTEONLYONCE,
+                        );
+                        self.wait_handle = Some(wait_handle);
+                    }
+                    Poll::Pending
+                }
+            }
+        }
+
+        impl Drop for WaitFuture {
+            fn drop(&mut self) {
+                if let Some(wait_handle) = self.wait_handle {
+                    unsafe {
+                        UnregisterWait(wait_handle);
+                    }
+                }
+            }
+        }
+
+        WaitFuture::new(self.try_clone()?).await;
+
+        Ok(())
+    }
 }
 
 impl Drop for Handle {
@@ -67,3 +142,9 @@ unsafe impl Send for Handle {}
 #[derive(Debug, Error)]
 #[error("failed to clone handle")]
 pub struct CloneError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to wait for object")]
+pub enum WaitError {
+    Clone(#[from] CloneError),
+}

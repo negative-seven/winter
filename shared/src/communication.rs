@@ -33,12 +33,12 @@ impl<S: Serialize + Debug> Sender<S> {
         })
     }
 
-    pub fn send(&mut self, message: &S) -> Result<(), SendError> {
+    pub async fn send(&mut self, message: &S) -> Result<(), SendError> {
         #[allow(clippy::cast_possible_truncation)]
         self.pipe.write_all(&bincode::serialize(&message)?)?;
         self.pipe.flush()?;
         self.send_event.set()?;
-        self.acknowledge_event.wait()?;
+        self.acknowledge_event.wait().await?;
         self.acknowledge_event.reset()?;
         Ok(())
     }
@@ -92,7 +92,7 @@ where
 }
 
 impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
-    pub fn receive(&mut self) -> Result<Option<R>, ReceiveError> {
+    pub fn peek(&mut self) -> Result<Option<R>, ReceiveError> {
         if !self.send_event.get()? {
             return Ok(None);
         }
@@ -102,8 +102,8 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
         Ok(Some(received))
     }
 
-    pub fn receive_blocking(&mut self) -> Result<R, ReceiveError> {
-        self.send_event.wait()?;
+    pub async fn receive(&mut self) -> Result<R, ReceiveError> {
+        self.send_event.wait().await?;
         self.send_event.reset()?;
         let received = bincode::deserialize_from(&mut self.pipe)?;
         self.acknowledge_event.set()?;

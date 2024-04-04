@@ -1,4 +1,5 @@
 use crate::{hooks, log, Event, EVENT_QUEUE, MESSAGE_SENDER};
+use futures::executor::block_on;
 use shared::communication::{HooksMessage, LogLevel};
 use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex};
 use winapi::{
@@ -172,12 +173,14 @@ pub(crate) fn sleep(ticks: u64) {
                     }
                 }
                 Event::Idle => unsafe {
-                    MESSAGE_SENDER
-                        .assume_init_ref()
-                        .lock()
-                        .unwrap()
-                        .send(&HooksMessage::Idle)
-                        .unwrap();
+                    block_on(
+                        MESSAGE_SENDER
+                            .assume_init_ref()
+                            .lock()
+                            .unwrap()
+                            .send(&HooksMessage::Idle),
+                    )
+                    .unwrap();
                 },
                 #[allow(unreachable_patterns)] // Event is #[non_exhaustive]
                 event => unimplemented!("event {event:?}"),

@@ -53,7 +53,7 @@ impl Thread {
     }
 
     #[instrument(err)]
-    pub fn join(&self) -> Result<u32, JoinError> {
+    pub async fn join(&self) -> Result<u32, JoinError> {
         unsafe {
             if WaitForSingleObject(self.handle.as_raw(), INFINITE) == WAIT_FAILED {
                 return Err(io::Error::last_os_error().into());

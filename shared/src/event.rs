@@ -10,7 +10,7 @@ use winapi::{
     um::{
         minwinbase::SECURITY_ATTRIBUTES,
         synchapi::{CreateEventA, ResetEvent, SetEvent, WaitForSingleObject},
-        winbase::{INFINITE, WAIT_FAILED, WAIT_OBJECT_0},
+        winbase::{WAIT_FAILED, WAIT_OBJECT_0},
     },
 };
 
@@ -68,14 +68,9 @@ impl ManualResetEvent {
         }
     }
 
-    pub fn wait(&self) -> Result<(), GetError> {
-        unsafe {
-            match WaitForSingleObject(self.handle.as_raw(), INFINITE) {
-                WAIT_OBJECT_0 => Ok(()),
-                WAIT_FAILED => Err(io::Error::last_os_error().into()),
-                _ => unreachable!(),
-            }
-        }
+    pub async fn wait(&self) -> Result<(), GetError> {
+        self.handle.wait().await?;
+        Ok(())
     }
 
     pub fn set(&mut self) -> Result<(), SetError> {
@@ -107,7 +102,10 @@ pub struct CloneError(#[from] handle::CloneError);
 
 #[derive(Debug, Error)]
 #[error("failed to get event state")]
-pub struct GetError(#[from] io::Error);
+pub enum GetError {
+    HandleWait(#[from] handle::WaitError),
+    Os(#[from] io::Error),
+}
 
 #[derive(Debug, Error)]
 #[error("failed to set event to signaled state")]

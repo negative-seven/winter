@@ -8,6 +8,10 @@ use tracing::info;
 use winter::Conductor;
 
 fn main() -> Result<()> {
+    futures::executor::block_on(main_async())
+}
+
+async fn main_async() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -23,19 +27,22 @@ fn main() -> Result<()> {
                 info!("stdout: {}", line);
             }
         }),
-    )?;
-    conductor.resume()?;
+    )
+    .await?;
+    conductor.resume().await?;
 
     let mut wait = {
         let mut sleep_target = Instant::now();
         move |conductor: &mut Conductor, duration| -> Result<(), anyhow::Error> {
-            let now = Instant::now();
-            conductor.advance_time(duration)?;
-            sleep_target += duration;
-            sleep_target = sleep_target.max(now.checked_sub(duration * 4).unwrap_or(now));
-            sleep(sleep_target - now);
-            conductor.wait_until_idle()?;
-            Ok(())
+            futures::executor::block_on(async {
+                let now = Instant::now();
+                conductor.advance_time(duration).await?;
+                sleep_target += duration;
+                sleep_target = sleep_target.max(now.checked_sub(duration * 4).unwrap_or(now));
+                sleep(sleep_target - now);
+                conductor.wait_until_idle().await?;
+                Ok(())
+            })
         }
     };
     if let Some(movie_path) = movie_path {
@@ -45,7 +52,7 @@ fn main() -> Result<()> {
                 "key" => {
                     let key_id = tokens.next().unwrap().parse::<u8>()?;
                     let key_state = tokens.next().unwrap().parse::<u8>()? != 0;
-                    conductor.set_key_state(key_id, key_state)?;
+                    conductor.set_key_state(key_id, key_state).await?;
                 }
                 "wait" => {
                     wait(

@@ -1,4 +1,8 @@
-use crate::{handle::Handle, pipe, thread::Thread};
+use crate::{
+    handle::{self, Handle},
+    pipe,
+    thread::Thread,
+};
 use std::{
     ffi::{CStr, CString, NulError},
     io,
@@ -17,15 +21,12 @@ use winapi::{
             CreateProcessA, CreateRemoteThread, GetCurrentProcess, GetProcessId,
             PROCESS_INFORMATION, STARTUPINFOA,
         },
-        synchapi::WaitForSingleObject,
         tlhelp32::{
             CreateToolhelp32Snapshot, Module32First, Module32Next, Thread32First, Thread32Next,
             MODULEENTRY32, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32, TH32CS_SNAPTHREAD,
             THREADENTRY32,
         },
-        winbase::{
-            CreateJobObjectA, CREATE_SUSPENDED, INFINITE, STARTF_USESTDHANDLES, WAIT_FAILED,
-        },
+        winbase::{CreateJobObjectA, CREATE_SUSPENDED, STARTF_USESTDHANDLES},
         winnt::{
             JobObjectExtendedLimitInformation, IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER,
             IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_FILE_MACHINE_AMD64,
@@ -193,13 +194,8 @@ impl Process {
         Ok(())
     }
 
-    pub fn join(&self) -> Result<(), JoinError> {
-        unsafe {
-            if WaitForSingleObject(self.handle.as_raw(), INFINITE) == WAIT_FAILED {
-                return Err(io::Error::last_os_error().into());
-            }
-        }
-
+    pub async fn join(&self) -> Result<(), JoinError> {
+        self.handle.wait().await?;
         Ok(())
     }
 
@@ -534,7 +530,7 @@ impl Process {
     }
 
     #[instrument]
-    pub fn inject_dll(&self, library_path: &str) -> Result<(), InjectDllError> {
+    pub async fn inject_dll(&self, library_path: &str) -> Result<(), InjectDllError> {
         let library_path_c_string =
             CString::new(library_path).map_err(LibraryPathContainsNulError)?;
 
@@ -544,7 +540,8 @@ impl Process {
 
         debug!("run dummy thread to provoke loading of kernel32.dll");
         self.create_thread(no_op_function_pointer, false, None)?
-            .join()?;
+            .join()
+            .await?;
 
         debug!("write injected dll path");
         let injected_dll_path_pointer =
@@ -611,7 +608,8 @@ impl Process {
         debug!("run dll loading thread");
         match self
             .create_thread(load_dll_function_pointer, false, None)?
-            .join()?
+            .join()
+            .await?
         {
             0 => Ok(()),
             error_code => return Err(LoadLibraryThreadError { error_code }.into()),
@@ -779,7 +777,7 @@ pub enum KillOnCurrentProcessExitError {
 
 #[derive(Debug, Error)]
 #[error("error occurred while joining process")]
-pub struct JoinError(#[from] io::Error);
+pub struct JoinError(#[from] handle::WaitError);
 
 #[derive(Debug, Error)]
 #[error("failed to get process id")]

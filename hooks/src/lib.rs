@@ -3,6 +3,7 @@
 mod hooks;
 mod state;
 
+use futures::executor::block_on;
 use shared::{
     communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
     event::ManualResetEvent,
@@ -48,7 +49,7 @@ impl EventQueue {
         if inner.queue.is_empty() {
             let pending_event = inner.pending_event.try_clone().unwrap();
             drop(inner);
-            pending_event.wait().unwrap();
+            block_on(pending_event.wait()).unwrap();
             inner = self.0.lock().unwrap();
         }
         let event = inner.queue.pop_front().unwrap();
@@ -72,13 +73,13 @@ macro_rules! log {
         #[allow(unused_qualifications)]
         {
             let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
-            message_sender
+            futures::executor::block_on(message_sender
                 .lock()
                 .unwrap()
                 .send(&shared::communication::HooksMessage::Log {
                     level: $level,
                     message: format!($($format_args),+),
-                })
+                }))
                 .unwrap();
         }
     };
@@ -109,11 +110,13 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
     hooks::initialize();
 
     let message_sender = unsafe { MESSAGE_SENDER.assume_init_ref() };
-    message_sender
-        .lock()
-        .unwrap()
-        .send(&HooksMessage::HooksInitialized)
-        .unwrap();
+    block_on(
+        message_sender
+            .lock()
+            .unwrap()
+            .send(&HooksMessage::HooksInitialized),
+    )
+    .unwrap();
     log!(
         LogLevel::Debug,
         "assuming thread with id 0x{:x} to be the main thread",
@@ -121,7 +124,7 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
     );
     loop {
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
-        match message_receiver.receive_blocking().unwrap() {
+        match block_on(message_receiver.receive()).unwrap() {
             #[allow(clippy::cast_possible_truncation)]
             ConductorMessage::Resume => {
                 for thread in process::Process::get_current()
