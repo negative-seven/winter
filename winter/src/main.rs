@@ -71,6 +71,6 @@ async fn wait(
     *sleep_target += duration;
     *sleep_target = (*sleep_target).max(now.checked_sub(duration * 4).unwrap_or(now));
     sleep(*sleep_target - now);
-    conductor.wait_until_idle().await?;
+    conductor.wait_until_inactive().await?;
     Ok(())
 }

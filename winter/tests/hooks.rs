@@ -7,6 +7,7 @@ use std::{
 use test_utilities::build;
 use tokio::test;
 use tracing::info;
+use winter::InactiveState;
 
 fn init_test() {
     static ONCE: Once = Once::new();
@@ -48,7 +49,7 @@ async fn run_and_get_stdout(
     for event in events {
         match event {
             Event::AdvanceTime(duration) => {
-                conductor.wait_until_idle().await?;
+                assert!(conductor.wait_until_inactive().await? == InactiveState::Idle);
                 stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
                 conductor.advance_time(*duration).await?;
             }
@@ -57,7 +58,7 @@ async fn run_and_get_stdout(
             }
         }
     }
-    conductor.wait_until_exit().await?; // TODO: check that process only exited after the last time advancement
+    assert!(conductor.wait_until_inactive().await? == InactiveState::Terminated);
     stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
     Ok(stdout_by_instant)
 }

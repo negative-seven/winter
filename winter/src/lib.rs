@@ -7,6 +7,7 @@ use shared::{
 };
 use std::{io::Read, time::Duration};
 use thiserror::Error;
+use tokio::select;
 
 pub struct Conductor {
     process: process::Process,
@@ -14,7 +15,6 @@ pub struct Conductor {
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
     message_sender: communication::Sender<ConductorMessage>,
-    message_self_sender: communication::Sender<HooksMessage>,
     idle: ManualResetEvent,
     receive_messages_task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -33,7 +33,6 @@ impl Conductor {
         // handles can be inherited
         let (conductor_sender, hooks_receiver) = communication::new_sender_and_receiver()?;
         let (hooks_sender, mut conductor_receiver) = communication::new_sender_and_receiver()?;
-        let conductor_self_sender = hooks_sender.try_clone()?;
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
@@ -85,7 +84,6 @@ impl Conductor {
                 loop {
                     match conductor_receiver.receive().await.unwrap() {
                         HooksMessage::Idle => idle.set().unwrap(),
-                        HooksMessage::Stop => break,
                         HooksMessage::Log { level, message } => {
                             match level {
                                 LogLevel::Trace => tracing::trace!(target: "hooks", message),
@@ -109,7 +107,6 @@ impl Conductor {
             },
             stdout_pipe_reader,
             message_sender: conductor_sender,
-            message_self_sender: conductor_self_sender,
             idle,
             receive_messages_task: Some(receive_messages_task),
         })
@@ -134,24 +131,29 @@ impl Conductor {
         Ok(())
     }
 
-    pub async fn wait_until_idle(&mut self) -> Result<(), WaitUntilIdleError> {
+    pub async fn wait_until_inactive(&mut self) -> Result<InactiveState, WaitUntilInactiveError> {
         self.idle.reset()?;
-        self.message_sender
-            .send(&ConductorMessage::IdleRequest)
-            .await?;
-        self.idle.wait().await?;
+        let state = select! {
+            result = async {
+                self.message_sender
+                    .send(&ConductorMessage::IdleRequest)
+                    .await?;
+                self.idle.wait().await?;
+                Ok::<_, WaitUntilInactiveError>(())
+            } => {
+                result?;
+                InactiveState::Idle
+            }
+            result = self.process.join() => {
+                result?;
+                if let Some(task) = self.receive_messages_task.take() {
+                    task.abort();
+                }
+                InactiveState::Terminated
+            }
+        };
         self.check_stdout();
-        Ok(())
-    }
-
-    pub async fn wait_until_exit(&mut self) -> Result<(), WaitUntilExitError> {
-        self.process.join().await?;
-        self.check_stdout();
-        self.message_self_sender.send(&HooksMessage::Stop).await?;
-        if let Some(task) = self.receive_messages_task.take() {
-            task.abort();
-        }
-        Ok(())
+        Ok(state)
     }
 
     fn check_stdout(&mut self) {
@@ -161,6 +163,12 @@ impl Conductor {
             self.stdout_callback.as_ref().inspect(|f| f(&stdout));
         }
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum InactiveState {
+    Idle,
+    Terminated,
 }
 
 #[derive(Debug, Error)]
@@ -216,16 +224,10 @@ pub enum AdvanceTimeError {
 }
 
 #[derive(Debug, Error)]
-#[error("error occurred while waiting for the subprocess to become idle")]
-pub enum WaitUntilIdleError {
+#[error("error occurred while waiting for the subprocess to become inactive")]
+pub enum WaitUntilInactiveError {
     EventGet(#[from] event::GetError),
     EventReset(#[from] event::ResetError),
-    MessageSend(#[from] communication::SendError),
-}
-
-#[derive(Debug, Error)]
-#[error("error occurred while waiting for the subprocess to exit")]
-pub enum WaitUntilExitError {
     ProcessJoin(#[from] process::JoinError),
     MessageSend(#[from] communication::SendError),
 }

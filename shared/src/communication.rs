@@ -199,7 +199,6 @@ pub enum ConductorMessage {
 pub enum HooksMessage {
     HooksInitialized,
     Idle,
-    Stop,
     Log { level: LogLevel, message: String },
 }
 
