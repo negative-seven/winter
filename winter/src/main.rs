@@ -1,9 +1,9 @@
 use anyhow::Result;
 use std::{
     env,
-    thread::sleep,
     time::{Duration, Instant},
 };
+use tokio::time::sleep;
 use tracing::info;
 use winter::Conductor;
 
@@ -70,7 +70,7 @@ async fn wait(
     conductor.advance_time(duration).await?;
     *sleep_target += duration;
     *sleep_target = (*sleep_target).max(now.checked_sub(duration * 4).unwrap_or(now));
-    sleep(*sleep_target - now);
+    sleep(*sleep_target - now).await;
     conductor.wait_until_inactive().await?;
     Ok(())
 }

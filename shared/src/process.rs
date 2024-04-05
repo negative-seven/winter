@@ -290,7 +290,6 @@ impl Process {
         skip(address),
         fields(address = %format!("0x{:x}", address))
     )]
-    #[allow(dead_code)]
     pub fn read_to_vec(&self, address: usize, size: usize) -> Result<Vec<u8>, io::Error> {
         let mut data = vec![0; size];
         unsafe {
@@ -344,7 +343,6 @@ impl Process {
         skip(address, data),
         fields(address = %format!("0x{:x}", address), data_len = data.len())
     )]
-    #[allow(dead_code)]
     pub fn write(&self, address: usize, data: &[u8]) -> Result<(), io::Error> {
         unsafe {
             if WriteProcessMemory(
@@ -482,7 +480,6 @@ impl Process {
             return Err(InvalidModuleHeadersError.into());
         }
 
-        #[allow(clippy::cast_sign_loss)]
         let optional_header_address =
             pe_header_address + 4 + std::mem::size_of::<IMAGE_FILE_HEADER>();
         debug!("read optional header from 0x{optional_header_address:x} and verify magic",);

@@ -88,7 +88,7 @@ pub(crate) use log;
 
 #[allow(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
+pub unsafe extern "system" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
     let mut message_receiver;
     unsafe {
         let initial_message = std::ptr::read_unaligned(initial_message_pointer);
@@ -125,7 +125,6 @@ pub unsafe extern "stdcall" fn initialize(initial_message_pointer: *mut Conducto
     loop {
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
         match block_on(message_receiver.receive()).unwrap() {
-            #[allow(clippy::cast_possible_truncation)]
             ConductorMessage::Resume => {
                 for thread in process::Process::get_current()
                     .iter_thread_ids()

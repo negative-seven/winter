@@ -155,7 +155,6 @@ const HOOKS: &[(&str, &str, *const c_void)] = &[
     ),
 ];
 
-#[allow(clippy::too_many_lines)] // TODO
 pub(crate) fn initialize() {
     for (module_name, function_name, hook) in HOOKS {
         fn hook_function(

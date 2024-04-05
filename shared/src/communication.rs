@@ -146,7 +146,6 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
     }
 }
 
-#[allow(clippy::type_complexity)]
 pub fn new_sender_and_receiver<T>() -> Result<(Sender<T>, Receiver<T>), NewSenderAndReceiverError>
 where
     T: Serialize + for<'de> Deserialize<'de> + Debug + Debug,
