@@ -76,7 +76,7 @@ pub(crate) fn get_ticks_with_busy_wait() -> u64 {
         state.busy_wait_count += 1;
         if state.busy_wait_count >= State::BUSY_WAIT_THRESHOLD {
             drop(state);
-            sleep(State::TICKS_PER_SECOND / 60);
+            sleep_indefinitely();
             state = STATE.lock().unwrap();
         }
     }
@@ -103,88 +103,110 @@ pub(crate) fn sleep(ticks: u64) {
             state.ticks += ticks_advanced_by;
             state.pending_ticks -= ticks_advanced_by;
             remaining_ticks -= ticks_advanced_by;
+            if remaining_ticks == 0 {
+                state.busy_wait_count = 0;
+                break;
+            }
         }
+        poll_events_for_sleep();
+    }
+}
 
-        if remaining_ticks == 0 {
-            STATE.lock().unwrap().busy_wait_count = 0;
-            break;
+pub(crate) fn sleep_indefinitely() {
+    if !in_main_thread() {
+        return;
+    }
+
+    log!(LogLevel::Debug, "sleeping indefinitely");
+
+    loop {
+        {
+            let mut state = STATE.lock().unwrap();
+            if state.pending_ticks > 0 {
+                state.ticks += state.pending_ticks;
+                state.pending_ticks = 0;
+                state.busy_wait_count = 0;
+                break;
+            }
         }
+        poll_events_for_sleep();
+    }
+}
 
-        loop {
-            let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
-            let event = event_queue.dequeue_blocking();
-            match event {
-                #[allow(clippy::cast_possible_truncation)]
-                #[allow(clippy::cast_precision_loss)]
-                #[allow(clippy::cast_sign_loss)]
-                Event::AdvanceTime(duration) => {
-                    STATE.lock().unwrap().pending_ticks +=
-                        (duration.as_secs_f64() * State::TICKS_PER_SECOND as f64).round() as u64;
-                    break;
+fn poll_events_for_sleep() {
+    loop {
+        let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
+        let event = event_queue.dequeue_blocking();
+        match event {
+            #[allow(clippy::cast_possible_truncation)]
+            #[allow(clippy::cast_precision_loss)]
+            #[allow(clippy::cast_sign_loss)]
+            Event::AdvanceTime(duration) => {
+                STATE.lock().unwrap().pending_ticks +=
+                    (duration.as_secs_f64() * State::TICKS_PER_SECOND as f64).round() as u64;
+                break;
+            }
+            Event::SetKeyState {
+                id: key_id,
+                state: key_state,
+            } => {
+                let key_previous_state;
+                {
+                    let mut state = STATE.lock().unwrap();
+                    key_previous_state = state.get_key_state(key_id);
+                    state.set_key_state(key_id, key_state);
                 }
-                Event::SetKeyState {
-                    id: key_id,
-                    state: key_state,
-                } => {
-                    let key_previous_state;
-                    {
-                        let mut state = STATE.lock().unwrap();
-                        key_previous_state = state.get_key_state(key_id);
-                        state.set_key_state(key_id, key_state);
-                    }
 
-                    {
-                        unsafe extern "system" fn callback(window: HWND, message: isize) -> i32 {
-                            if window != NULL.cast() && unsafe { IsWindowVisible(window) } == 0 {
-                                return 1;
-                            }
-
-                            let message = unsafe { &mut *(message as *mut MSGSend) };
-                            message.0.hwnd = window;
-                            STATE
-                                .lock()
-                                .unwrap()
-                                .custom_message_queue
-                                .push_back(message.clone());
-                            1
+                {
+                    unsafe extern "system" fn callback(window: HWND, message: isize) -> i32 {
+                        if window != NULL.cast() && unsafe { IsWindowVisible(window) } == 0 {
+                            return 1;
                         }
 
-                        #[allow(clippy::cast_possible_truncation)]
-                        let time_in_ticks = STATE.lock().unwrap().ticks as u32;
-                        unsafe {
-                            EnumThreadWindows(
-                                MAIN_THREAD_ID.assume_init(),
-                                Some(callback),
-                                &mut MSGSend(MSG {
-                                    hwnd: NULL.cast(),
-                                    message: if key_state { WM_KEYDOWN } else { WM_KEYUP },
-                                    wParam: usize::from(key_id),
-                                    lParam: (isize::from(!key_state) << 31)
-                                        | (isize::from(key_previous_state) << 30)
-                                        | 1,
-                                    #[allow(clippy::cast_possible_truncation)]
-                                    time: (u64::from(time_in_ticks) * 1000
-                                        / State::TICKS_PER_SECOND)
-                                        as u32,
-                                    pt: POINT { x: 0, y: 0 },
-                                }) as *mut MSGSend as isize,
-                            );
-                        }
-                    }
-                }
-                Event::Idle => unsafe {
-                    block_on(
-                        MESSAGE_SENDER
-                            .assume_init_ref()
+                        let message = unsafe { &mut *(message as *mut MSGSend) };
+                        message.0.hwnd = window;
+                        STATE
                             .lock()
                             .unwrap()
-                            .send(&HooksMessage::Idle),
-                    )
-                    .unwrap();
-                },
-                #[allow(unreachable_patterns)] // Event is #[non_exhaustive]
-                event => unimplemented!("event {event:?}"),
+                            .custom_message_queue
+                            .push_back(message.clone());
+                        1
+                    }
+
+                    #[allow(clippy::cast_possible_truncation)]
+                    let time_in_ticks = STATE.lock().unwrap().ticks as u32;
+                    unsafe {
+                        EnumThreadWindows(
+                            MAIN_THREAD_ID.assume_init(),
+                            Some(callback),
+                            &mut MSGSend(MSG {
+                                hwnd: NULL.cast(),
+                                message: if key_state { WM_KEYDOWN } else { WM_KEYUP },
+                                wParam: usize::from(key_id),
+                                lParam: (isize::from(!key_state) << 31)
+                                    | (isize::from(key_previous_state) << 30)
+                                    | 1,
+                                #[allow(clippy::cast_possible_truncation)]
+                                time: (u64::from(time_in_ticks) * 1000 / State::TICKS_PER_SECOND)
+                                    as u32,
+                                pt: POINT { x: 0, y: 0 },
+                            }) as *mut MSGSend as isize,
+                        );
+                    }
+                }
             }
+            Event::Idle => unsafe {
+                block_on(
+                    MESSAGE_SENDER
+                        .assume_init_ref()
+                        .lock()
+                        .unwrap()
+                        .send(&HooksMessage::Idle),
+                )
+                .unwrap();
+            },
+            #[allow(unreachable_patterns)] // Event is #[non_exhaustive]
+            event => unimplemented!("event {event:?}"),
         }
     }
 }

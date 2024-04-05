@@ -100,7 +100,7 @@ async fn get_tick_count() -> Result<()> {
             executable_path,
             &[
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 30.0)),
             ],
         )
         .await?
@@ -112,7 +112,7 @@ async fn get_tick_count() -> Result<()> {
             vec![
                 "0\r\n".repeat(99),
                 "16\r\n".repeat(100),
-                "33\r\n".to_string()
+                "50\r\n".to_string()
             ]
         );
         Ok(())
@@ -159,8 +159,8 @@ async fn get_tick_count_64() -> Result<()> {
         let stdout = run_and_get_stdout(
             executable_path,
             &[
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(0.1)),
+                Event::AdvanceTime(Duration::from_secs_f64(0.2)),
             ],
         )
         .await?
@@ -171,8 +171,8 @@ async fn get_tick_count_64() -> Result<()> {
             stdout,
             vec![
                 "0\r\n".repeat(99),
-                "16\r\n".repeat(100),
-                "33\r\n".to_string()
+                "100\r\n".repeat(100),
+                "300\r\n".to_string()
             ]
         );
         Ok(())
@@ -219,8 +219,8 @@ async fn time_get_time() -> Result<()> {
         let stdout = run_and_get_stdout(
             executable_path,
             &[
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(100.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(0.001)),
             ],
         )
         .await?
@@ -231,8 +231,8 @@ async fn time_get_time() -> Result<()> {
             stdout,
             vec![
                 "0\r\n".repeat(99),
-                "16\r\n".repeat(100),
-                "33\r\n".to_string()
+                "100000\r\n".repeat(100),
+                "100001\r\n".to_string()
             ]
         );
         Ok(())
@@ -279,8 +279,8 @@ async fn get_system_time_as_file_time() -> Result<()> {
         let stdout = run_and_get_stdout(
             executable_path,
             &[
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(2.0 / 3.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 3.0)),
             ],
         )
         .await?
@@ -291,8 +291,8 @@ async fn get_system_time_as_file_time() -> Result<()> {
             stdout,
             vec![
                 "0 0\r\n".repeat(99),
-                "0 166666\r\n".repeat(100),
-                "0 333333\r\n".to_string()
+                "0 6666666\r\n".repeat(100),
+                "0 10000000\r\n".to_string()
             ]
         );
         Ok(())
@@ -344,8 +344,8 @@ async fn get_system_time_precise_as_file_time() -> Result<()> {
             let stdout = run_and_get_stdout(
                 executable_path,
                 &[
-                    Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
-                    Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                    Event::AdvanceTime(Duration::from_secs_f64(2.0 / 5.0)),
+                    Event::AdvanceTime(Duration::from_secs_f64(17.0 / 100.0)),
                 ],
             )
             .await?
@@ -356,8 +356,8 @@ async fn get_system_time_precise_as_file_time() -> Result<()> {
                 stdout,
                 vec![
                     "0 0\r\n".repeat(99),
-                    "0 166666\r\n".repeat(100),
-                    "0 333333\r\n".to_string()
+                    "0 4000000\r\n".repeat(100),
+                    "0 5700000\r\n".to_string()
                 ]
             );
             Ok(())
@@ -408,8 +408,8 @@ async fn query_performance_counter() -> Result<()> {
         let stdout = run_and_get_stdout(
             executable_path,
             &[
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
-                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 25.0)),
+                Event::AdvanceTime(Duration::from_secs_f64(1.0 / 50.0)),
             ],
         )
         .await?
@@ -423,8 +423,8 @@ async fn query_performance_counter() -> Result<()> {
             stdout,
             vec![
                 format!("{}/{}\r\n", 0, frequency).repeat(99),
-                format!("{}/{}\r\n", frequency / 60, frequency).repeat(100),
-                format!("{}/{}\r\n", frequency * 2 / 60, frequency).to_string()
+                format!("{}/{}\r\n", frequency / 25, frequency).repeat(100),
+                format!("{}/{}\r\n", frequency * 3 / 50, frequency).to_string()
             ]
         );
         Ok(())
