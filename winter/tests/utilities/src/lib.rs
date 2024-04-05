@@ -1,3 +1,3 @@
 mod build;
 
-pub use build::build;
+pub use build::for_executable;

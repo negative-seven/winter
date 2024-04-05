@@ -1,5 +1,7 @@
+use anyhow::Result;
 use std::{
     ffi::OsString,
+    future::Future,
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
@@ -21,12 +23,19 @@ impl Architecture {
     }
 }
 
-pub fn build(program_name: impl AsRef<str>) -> impl Iterator<Item = PathBuf> {
-    [
-        build_for_architecture(&program_name, Architecture::X86),
-        build_for_architecture(&program_name, Architecture::X64),
-    ]
-    .into_iter()
+#[allow(clippy::missing_errors_doc)]
+pub async fn for_executable<R>(
+    program_name: impl AsRef<str>,
+    callback: impl Fn(PathBuf) -> R,
+) -> Result<()>
+where
+    R: Future<Output = Result<()>>,
+{
+    tokio::try_join!(
+        callback(build_for_architecture(&program_name, Architecture::X86)),
+        callback(build_for_architecture(&program_name, Architecture::X64)),
+    )?;
+    Ok(())
 }
 
 fn build_for_architecture(program_name: impl AsRef<str>, architecture: Architecture) -> PathBuf {
