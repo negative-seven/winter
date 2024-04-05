@@ -33,7 +33,12 @@ async fn run_and_get_stdout(
         let stdout = Arc::clone(&stdout);
         move |bytes: &_| {
             for line in String::from_utf8_lossy(bytes).lines() {
-                info!("stdout: {}", line);
+                const LINE_LENGTH_LIMIT: usize = 256;
+                if line.len() <= LINE_LENGTH_LIMIT {
+                    info!("stdout: {}", line);
+                } else {
+                    info!("stdout: {} (...)", &line[..LINE_LENGTH_LIMIT]);
+                }
             }
 
             stdout.lock().unwrap().extend_from_slice(bytes);
@@ -69,6 +74,18 @@ async fn stdout() -> Result<()> {
     for executable_path in build("stdout") {
         let stdout = run_and_get_stdout(executable_path, &[]).await?;
         assert_eq!(stdout, vec![b"abcABC123!\"_\x99\xaa\xbb"]);
+    }
+    Ok(())
+}
+
+#[test]
+async fn stdout_large() -> Result<()> {
+    init_test();
+    for executable_path in build("stdout_large") {
+        let stdout = run_and_get_stdout(executable_path, &[]).await?;
+        assert_eq!(stdout.len(), 1);
+        assert_eq!(stdout[0].len(), 1024 * 1024 - 1);
+        assert!(stdout[0].iter().all(|&byte| byte == b's'));
     }
     Ok(())
 }

@@ -5,7 +5,10 @@ use shared::{
     pipe,
     process::{self, CheckIs64BitError},
 };
-use std::{io::Read, time::Duration};
+use std::{
+    io::{self, Read},
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::select;
 
@@ -133,6 +136,7 @@ impl Conductor {
 
     pub async fn wait_until_inactive(&mut self) -> Result<InactiveState, WaitUntilInactiveError> {
         self.idle.reset()?;
+        let mut stdout = Vec::new();
         let state = select! {
             result = async {
                 self.message_sender
@@ -151,17 +155,26 @@ impl Conductor {
                 }
                 InactiveState::Terminated
             }
+            error = async {
+                loop {
+                    // stdout is read in a loop with a sleep, as there appears to be no way
+                    // to await a signal indicating that stdout has just been written to
+                    if let Err(err) = self.stdout_pipe_reader.read_to_end(&mut stdout) {
+                        return err;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            } => {
+                return Err(error.into());
+            }
         };
-        self.check_stdout();
-        Ok(state)
-    }
 
-    fn check_stdout(&mut self) {
-        let mut stdout = Vec::new();
         self.stdout_pipe_reader.read_to_end(&mut stdout).unwrap();
         if !stdout.is_empty() {
             self.stdout_callback.as_ref().inspect(|f| f(&stdout));
         }
+
+        Ok(state)
     }
 }
 
@@ -230,4 +243,5 @@ pub enum WaitUntilInactiveError {
     EventReset(#[from] event::ResetError),
     ProcessJoin(#[from] process::JoinError),
     MessageSend(#[from] communication::SendError),
+    Os(#[from] io::Error),
 }
