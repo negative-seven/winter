@@ -1,11 +1,15 @@
 use anyhow::Result;
-use std::{
-    env,
-    time::{Duration, Instant},
-};
+use clap::Parser;
+use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tracing::info;
 use winter::Conductor;
+
+#[derive(clap::Parser)]
+struct Arguments {
+    executable_path: String,
+    movie_path: Option<String>,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,12 +17,10 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let mut arguments = env::args().skip(1);
-    let executable_path = arguments.next().expect("missing argument: executable path");
-    let movie_path = arguments.next();
+    let arguments = Arguments::parse();
 
     let mut conductor = Conductor::new(
-        executable_path,
+        arguments.executable_path,
         Some(|bytes: &_| {
             for line in String::from_utf8_lossy(bytes).lines() {
                 info!("stdout: {}", line);
@@ -29,7 +31,7 @@ async fn main() -> Result<()> {
     conductor.resume().await?;
 
     let mut sleep_target = Instant::now();
-    if let Some(movie_path) = movie_path {
+    if let Some(movie_path) = arguments.movie_path {
         for line in std::fs::read_to_string(movie_path)?.lines() {
             let mut tokens = line.split_ascii_whitespace();
             match tokens.next().unwrap().to_lowercase().as_str() {

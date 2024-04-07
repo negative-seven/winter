@@ -14,6 +14,7 @@ use tokio::select;
 
 pub struct Conductor {
     process: process::Process,
+    #[allow(clippy::type_complexity)]
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
     message_sender: communication::Sender<ConductorMessage>,
