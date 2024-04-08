@@ -1,14 +1,17 @@
 use anyhow::Result;
 use clap::Parser;
-use std::time::{Duration, Instant};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use tokio::time::sleep;
 use tracing::info;
 use winter::Conductor;
 
 #[derive(clap::Parser)]
 struct Arguments {
-    executable_path: String,
-    movie_path: Option<String>,
+    executable_path: PathBuf,
+    movie_path: Option<PathBuf>,
 }
 
 #[tokio::main]

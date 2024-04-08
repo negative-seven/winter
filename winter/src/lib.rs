@@ -7,6 +7,7 @@ use shared::{
 };
 use std::{
     io::{self, Read},
+    path::Path,
     time::Duration,
 };
 use thiserror::Error;
@@ -24,7 +25,7 @@ pub struct Conductor {
 
 impl Conductor {
     pub async fn new<F>(
-        executable_path: impl AsRef<str>,
+        executable_path: impl AsRef<Path>,
         stdout_callback: Option<F>,
     ) -> Result<Self, NewError>
     where

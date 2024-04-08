@@ -6,6 +6,7 @@ use crate::{
 use std::{
     ffi::{CStr, CString, NulError},
     io,
+    os::windows::ffi::OsStrExt,
     path::Path,
 };
 use thiserror::Error;
@@ -18,8 +19,8 @@ use winapi::{
         jobapi2::{AssignProcessToJobObject, SetInformationJobObject},
         memoryapi::{ReadProcessMemory, VirtualAllocEx, VirtualFreeEx, WriteProcessMemory},
         processthreadsapi::{
-            CreateProcessA, CreateRemoteThread, GetCurrentProcess, GetProcessId,
-            PROCESS_INFORMATION, STARTUPINFOA,
+            CreateProcessW, CreateRemoteThread, GetCurrentProcess, GetProcessId,
+            PROCESS_INFORMATION, STARTUPINFOW,
         },
         tlhelp32::{
             CreateToolhelp32Snapshot, Module32First, Module32Next, Thread32First, Thread32Next,
@@ -52,27 +53,37 @@ impl Process {
         }
     }
 
-    #[instrument(ret, err)]
+    #[instrument(
+        ret,
+        err,
+        skip(executable_path),
+        fields(executable_path = executable_path.as_ref().display().to_string()),
+    )]
     pub fn create(
-        executable_path: &str,
+        executable_path: impl AsRef<Path>,
         suspended: bool,
         stdin_redirect: Option<pipe::Reader>,
         stdout_redirect: Option<pipe::Writer>,
         stderr_redirect: Option<pipe::Writer>,
     ) -> Result<Self, CreateError> {
-        let executable_path_c_string = CString::new(executable_path)?;
-        let executable_directory_path_c_string = CString::new(
-            Path::new(executable_path)
-                .parent()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-        )
-        .unwrap();
+        let executable_path_raw = executable_path
+            .as_ref()
+            .as_os_str()
+            .encode_wide()
+            .chain([0])
+            .collect::<Vec<_>>();
+        let executable_directory_path_raw = executable_path
+            .as_ref()
+            .parent()
+            .unwrap()
+            .as_os_str()
+            .encode_wide()
+            .chain([0])
+            .collect::<Vec<_>>();
 
-        #[allow(clippy::cast_possible_truncation)]
-        let mut startup_info = STARTUPINFOA {
-            cb: std::mem::size_of::<STARTUPINFOA>() as u32,
+        let mut startup_info = STARTUPINFOW {
+            #[allow(clippy::cast_possible_truncation)]
+            cb: std::mem::size_of::<STARTUPINFOW>() as u32,
             lpReserved: NULL.cast(),
             lpDesktop: NULL.cast(),
             lpTitle: NULL.cast(),
@@ -102,21 +113,25 @@ impl Process {
         };
 
         unsafe {
-            if CreateProcessA(
-                executable_path_c_string.as_ptr().cast(),
+            if CreateProcessW(
+                executable_path_raw.as_ptr(),
                 NULL.cast(),
                 NULL.cast(),
                 NULL.cast(),
                 TRUE,
                 if suspended { CREATE_SUSPENDED } else { 0 },
                 NULL.cast(),
-                executable_directory_path_c_string.as_ptr().cast(),
+                executable_directory_path_raw.as_ptr(),
                 &mut startup_info,
                 &mut process_information,
             ) == 0
             {
                 return Err(io::Error::last_os_error().into());
             }
+
+            // ensure these variables are dropped after the call to CreateProcessW
+            drop(executable_path_raw);
+            drop(executable_directory_path_raw);
 
             // ensure the handle gets cleaned up correctly
             Thread::from_handle(Handle::from_raw(process_information.hThread));
