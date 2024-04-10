@@ -4,7 +4,7 @@ use crate::{
     thread::Thread,
 };
 use std::{
-    ffi::{CStr, CString, NulError},
+    ffi::{CStr, CString, NulError, OsStr},
     io,
     os::windows::ffi::OsStrExt,
     path::Path,
@@ -56,11 +56,15 @@ impl Process {
     #[instrument(
         ret,
         err,
-        skip(executable_path),
-        fields(executable_path = executable_path.as_ref().display().to_string()),
+        skip(executable_path, command_line_string),
+        fields(
+            executable_path = executable_path.as_ref().display().to_string(),
+            command_line_string = command_line_string.as_ref().to_string_lossy().into_owned(),
+        ),
     )]
     pub fn create(
         executable_path: impl AsRef<Path>,
+        command_line_string: impl AsRef<OsStr>,
         suspended: bool,
         stdin_redirect: Option<pipe::Reader>,
         stdout_redirect: Option<pipe::Writer>,
@@ -77,6 +81,11 @@ impl Process {
             .parent()
             .unwrap()
             .as_os_str()
+            .encode_wide()
+            .chain([0])
+            .collect::<Vec<_>>();
+        let mut command_line_string_raw = command_line_string
+            .as_ref()
             .encode_wide()
             .chain([0])
             .collect::<Vec<_>>();
@@ -115,7 +124,7 @@ impl Process {
         unsafe {
             if CreateProcessW(
                 executable_path_raw.as_ptr(),
-                NULL.cast(),
+                command_line_string_raw.as_mut_ptr(),
                 NULL.cast(),
                 NULL.cast(),
                 TRUE,
@@ -136,11 +145,9 @@ impl Process {
             // ensure the handle gets cleaned up correctly
             Thread::from_handle(Handle::from_raw(process_information.hThread));
 
-            let process = Process {
+            Ok(Process {
                 handle: Handle::from_raw(process_information.hProcess),
-            };
-
-            Ok(process)
+            })
         }
     }
 

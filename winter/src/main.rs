@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::{
+    ffi::OsString,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -10,7 +11,33 @@ use winter::Conductor;
 
 #[derive(clap::Parser)]
 struct Arguments {
+    /// The executable to be run under Winter.
+    #[arg(name("executable"))]
     executable_path: PathBuf,
+
+    /// The command-line string to be passed to the spawned child process.
+    ///
+    /// The command-line string of a process is a single UTF-16 string passed to
+    /// the process upon creation. In many programs it is split into an array of
+    /// arguments by means of or similarly to the CommandLineToArgvW Windows API
+    /// call. Refer to the documentation for CommandLineToArgvW for more details
+    /// on typical parsing of arguments. Note that in such cases, providing this
+    /// argument may necessitate wrapping the command-line string in quotes and
+    /// escaping any inner quotes, potentially adding a layer on top of escape
+    /// sequences already present in the string.
+    ///
+    /// If this argument is given, it will not be automatically prepended with
+    /// the program name before being passed to the child process. For programs
+    /// that expect this behavior, the program name must be provided explicitly.
+    ///
+    /// If this argument is omitted, the command-line string will default to the
+    /// executable path wrapped in quotes.
+    #[arg(name("command_line_string"), short('a'), long)]
+    #[allow(clippy::struct_field_names)]
+    command_line_string: Option<OsString>,
+
+    /// An optional path to a movie file to be played.
+    #[arg(name("movie"), short, long)]
     movie_path: Option<PathBuf>,
 }
 
@@ -21,9 +48,16 @@ async fn main() -> Result<()> {
         .init();
 
     let arguments = Arguments::parse();
-
     let mut conductor = Conductor::new(
-        arguments.executable_path,
+        &arguments.executable_path,
+        arguments.command_line_string.unwrap_or_else(|| {
+            let executable_path = arguments.executable_path.as_os_str();
+            let mut string = OsString::with_capacity(executable_path.len() + 2);
+            string.push("\"");
+            string.push(executable_path);
+            string.push("\"");
+            string
+        }),
         Some(|bytes: &_| {
             for line in String::from_utf8_lossy(bytes).lines() {
                 info!("stdout: {}", line);

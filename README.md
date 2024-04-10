@@ -12,10 +12,14 @@ Prerequisites:
 Run Winter with the following command:
 
 ```text
-cargo run <executable> [<movie_file>]
+cargo run <executable> [-m <movie>] [-a <command_line_string>]
 ```
 
-The optional `movie_file` argument specifies a path to a "movie file", which is a sequence of commands to be sent to a spawned instance of the provided executable. Each line of a movie file must be one of the following commands:
+For more detailed usage instructions, run Winter with the `--help` flag.
+
+## Movie files
+
+The optional `-m`/`--movie` argument specifies a path to a "movie file", which is a sequence of commands to be sent to a spawned instance of the provided executable. Each line of a movie file must be one of the following commands:
 
 * `wait <time>`, where `time` is the number of seconds to wait before issuing the next command.
 

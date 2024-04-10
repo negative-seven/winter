@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::{
+    ffi::OsStr,
     path::Path,
     sync::{Arc, Mutex, Once},
     time::Duration,
@@ -26,6 +27,7 @@ enum Event {
 
 async fn run_and_get_stdout(
     executable_path: impl AsRef<Path>,
+    executable_command_line_string: impl AsRef<OsStr>,
     events: &[Event],
 ) -> Result<Vec<Vec<u8>>> {
     let stdout = Arc::new(Mutex::new(Vec::new()));
@@ -47,6 +49,7 @@ async fn run_and_get_stdout(
     let mut stdout_by_instant = Vec::new();
     let mut conductor = winter::Conductor::new(
         executable_path.as_ref().to_str().unwrap(),
+        &executable_command_line_string.as_ref().to_os_string(),
         Some(stdout_callback),
     )
     .await?;
@@ -72,7 +75,7 @@ async fn run_and_get_stdout(
 async fn stdout() -> Result<()> {
     init_test();
     for_executable("stdout", |executable_path| async {
-        let stdout = run_and_get_stdout(executable_path, &[]).await?;
+        let stdout = run_and_get_stdout(executable_path, "", &[]).await?;
         assert_eq!(stdout, vec![b"abcABC123!\"_\x99\xaa\xbb"]);
         Ok(())
     })
@@ -83,10 +86,21 @@ async fn stdout() -> Result<()> {
 async fn stdout_large() -> Result<()> {
     init_test();
     for_executable("stdout_large", |executable_path| async {
-        let stdout = run_and_get_stdout(executable_path, &[]).await?;
+        let stdout = run_and_get_stdout(executable_path, "", &[]).await?;
         assert_eq!(stdout.len(), 1);
         assert_eq!(stdout[0].len(), 1024 * 1024 - 1);
         assert!(stdout[0].iter().all(|&byte| byte == b's'));
+        Ok(())
+    })
+    .await
+}
+
+#[test]
+async fn command_line_string() -> Result<()> {
+    init_test();
+    for_executable("echo_command_line_string", |executable_path| async move {
+        let stdout = run_and_get_stdout(&executable_path, "abcABC123!\"_", &[]).await?;
+        assert_eq!(stdout, vec![b"abcABC123!\"_"]);
         Ok(())
     })
     .await
@@ -98,6 +112,7 @@ async fn get_tick_count() -> Result<()> {
     for_executable("get_tick_count", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 30.0)),
@@ -126,6 +141,7 @@ async fn get_tick_count_and_sleep() -> Result<()> {
     for_executable("get_tick_count_and_sleep", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 &Event::AdvanceTime(Duration::from_millis(78)),
                 &Event::AdvanceTime(Duration::from_millis(1)),
@@ -158,6 +174,7 @@ async fn get_tick_count_64() -> Result<()> {
     for_executable("get_tick_count_64", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 Event::AdvanceTime(Duration::from_secs_f64(0.1)),
                 Event::AdvanceTime(Duration::from_secs_f64(0.2)),
@@ -186,6 +203,7 @@ async fn get_tick_count_64_and_sleep() -> Result<()> {
     for_executable("get_tick_count_64_and_sleep", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 &Event::AdvanceTime(Duration::from_millis(206)),
                 &Event::AdvanceTime(Duration::from_millis(1)),
@@ -218,6 +236,7 @@ async fn time_get_time() -> Result<()> {
     for_executable("time_get_time", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 Event::AdvanceTime(Duration::from_secs_f64(100.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(0.001)),
@@ -246,6 +265,7 @@ async fn time_get_time_and_sleep() -> Result<()> {
     for_executable("time_get_time_and_sleep", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 &Event::AdvanceTime(Duration::from_millis(40)),
                 &Event::AdvanceTime(Duration::from_millis(1)),
@@ -278,6 +298,7 @@ async fn get_system_time_as_file_time() -> Result<()> {
     for_executable("get_system_time_as_file_time", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 Event::AdvanceTime(Duration::from_secs_f64(2.0 / 3.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 3.0)),
@@ -308,6 +329,7 @@ async fn get_system_time_as_file_time_and_sleep() -> Result<()> {
         |executable_path| async {
             let stdout = run_and_get_stdout(
                 executable_path,
+                "",
                 &[
                     &Event::AdvanceTime(Duration::from_millis(192)),
                     &Event::AdvanceTime(Duration::from_millis(1)),
@@ -343,6 +365,7 @@ async fn get_system_time_precise_as_file_time() -> Result<()> {
         |executable_path| async {
             let stdout = run_and_get_stdout(
                 executable_path,
+                "",
                 &[
                     Event::AdvanceTime(Duration::from_secs_f64(2.0 / 5.0)),
                     Event::AdvanceTime(Duration::from_secs_f64(17.0 / 100.0)),
@@ -374,6 +397,7 @@ async fn get_system_time_precise_as_file_time_and_sleep() -> Result<()> {
         |executable_path| async {
             let stdout = run_and_get_stdout(
                 executable_path,
+                "",
                 &[
                     &Event::AdvanceTime(Duration::from_millis(6)),
                     &Event::AdvanceTime(Duration::from_millis(1)),
@@ -407,6 +431,7 @@ async fn query_performance_counter() -> Result<()> {
     for_executable("query_performance_counter", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 25.0)),
                 Event::AdvanceTime(Duration::from_secs_f64(1.0 / 50.0)),
@@ -440,6 +465,7 @@ async fn query_performance_counter_and_sleep() -> Result<()> {
         |executable_path| async {
             let stdout = run_and_get_stdout(
                 executable_path,
+                "",
                 &[
                     &Event::AdvanceTime(Duration::from_millis(46)),
                     &Event::AdvanceTime(Duration::from_millis(1)),
@@ -483,6 +509,7 @@ async fn helper_for_key_state_tests(program_name: impl AsRef<str>) -> Result<()>
     for_executable(program_name, |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 key_event(65, true),
                 key_event(65, true),
@@ -552,6 +579,7 @@ async fn key_down_and_key_up() -> Result<()> {
     for_executable("key_down_and_key_up", |executable_path| async {
         let stdout = run_and_get_stdout(
             executable_path,
+            "",
             &[
                 key_event(65, true),
                 key_event(65, true),

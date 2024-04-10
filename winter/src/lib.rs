@@ -6,6 +6,7 @@ use shared::{
     process::{self, CheckIs64BitError},
 };
 use std::{
+    ffi::OsStr,
     io::{self, Read},
     path::Path,
     time::Duration,
@@ -26,6 +27,7 @@ pub struct Conductor {
 impl Conductor {
     pub async fn new<F>(
         executable_path: impl AsRef<Path>,
+        command_line_string: impl AsRef<OsStr>,
         stdout_callback: Option<F>,
     ) -> Result<Self, NewError>
     where
@@ -40,6 +42,7 @@ impl Conductor {
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
+            command_line_string,
             true,
             None,
             Some(stdout_pipe_writer),
