@@ -106,10 +106,25 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut Conductor
         state::MAIN_THREAD_ID.write(initial_message.main_thread_id);
         EVENT_QUEUE.write(EventQueue::new());
     }
+    let message_sender = unsafe { MESSAGE_SENDER.assume_init_ref() };
+
+    std::panic::set_hook(Box::new(|panic_info| {
+        log!(
+            LogLevel::Error,
+            "panicked{}{}",
+            match panic_info.location() {
+                Some(location) => format!(" at {location}"),
+                None => String::new(),
+            },
+            match panic_info.payload().downcast_ref::<&str>() {
+                Some(payload) => format!(": {payload}"),
+                None => String::new(),
+            },
+        );
+    }));
 
     hooks::initialize();
 
-    let message_sender = unsafe { MESSAGE_SENDER.assume_init_ref() };
     block_on(
         message_sender
             .lock()
