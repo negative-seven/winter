@@ -643,3 +643,18 @@ async fn key_down_and_key_up() -> Result<()> {
     })
     .await
 }
+
+#[test]
+async fn nt_set_information_thread() -> Result<()> {
+    init_test();
+    for_executable("nt_set_information_thread", |executable_path| async {
+        let stdout = run_and_get_stdout(executable_path, "", &[])
+            .await?
+            .iter()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(stdout, vec!["start\r\nbreakpoint\r\nend\r\n"]);
+        Ok(())
+    })
+    .await
+}

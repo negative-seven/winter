@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 futures = "0.3.30"
 minhook = "0.3.0"
+ntapi = "0.4.1"
 shared = { path = "../shared" }
 winapi = { version = "0.3.9", features = [
     "errhandlingapi",

@@ -1,9 +1,15 @@
 use crate::state::{self, State, STATE};
 use minhook::MinHook;
+use ntapi::ntpsapi::{NtSetInformationThread, ThreadHideFromDebugger, THREADINFOCLASS};
 use std::{collections::BTreeMap, sync::RwLock};
 use winapi::{
     ctypes::c_void,
-    shared::{minwindef::FILETIME, ntdef::NULL, windef::HWND},
+    shared::{
+        minwindef::FILETIME,
+        ntdef::{HANDLE, NULL},
+        ntstatus::STATUS_SUCCESS,
+        windef::HWND,
+    },
     um::{
         profileapi::{QueryPerformanceCounter, QueryPerformanceFrequency},
         synchapi::Sleep,
@@ -152,6 +158,12 @@ const HOOKS: &[(&str, &str, *const c_void)] = &[
         socket,
         socket_,
         unsafe extern "system" fn(i32, i32, i32) -> usize,
+    ),
+    hook!(
+        "ntdll.dll",
+        NtSetInformationThread,
+        nt_set_information_thread,
+        unsafe extern "system" fn(HANDLE, THREADINFOCLASS, *mut c_void, u32) -> i32
     ),
 ];
 
@@ -360,4 +372,21 @@ unsafe extern "system" fn get_system_time_precise_as_file_time(file_time: *mut F
 
 unsafe extern "system" fn socket_(_address_family: i32, _type: i32, _protocol: i32) -> usize {
     INVALID_SOCKET
+}
+
+unsafe extern "system" fn nt_set_information_thread(
+    thread: HANDLE,
+    information_class: THREADINFOCLASS,
+    information: *mut c_void,
+    information_length: u32,
+) -> i32 {
+    if information_class == ThreadHideFromDebugger {
+        STATUS_SUCCESS
+    } else {
+        let trampoline = get_trampoline!(
+            NtSetInformationThread,
+            unsafe extern "system" fn(HANDLE, THREADINFOCLASS, *mut c_void, u32) -> i32
+        );
+        unsafe { trampoline(thread, information_class, information, information_length) }
+    }
 }

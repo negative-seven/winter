@@ -42,10 +42,10 @@ fn build_for_architecture(program_name: impl AsRef<str>, architecture: Architect
     static ENVIRONMENT_VARIABLES_X86: OnceLock<Vec<(OsString, OsString)>> = OnceLock::new();
     static ENVIRONMENT_VARIABLES_X64: OnceLock<Vec<(OsString, OsString)>> = OnceLock::new();
 
-    let source_file_path =
-        PathBuf::from(format!("tests/programs/src/{}.c", program_name.as_ref(),));
-    let binary_file_path = PathBuf::from(format!(
-        "tests/programs/bin/{}/{}.exe",
+    let source_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../programs/src/{}.c", program_name.as_ref(),));
+    let binary_file_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../programs/bin/{}/{}.exe",
         architecture.name(),
         program_name.as_ref(),
     ));
@@ -69,6 +69,7 @@ fn build_for_architecture(program_name: impl AsRef<str>, architecture: Architect
         .arg(source_file_path)
         .arg("user32.lib")
         .arg("winmm.lib")
+        .arg("/DYNAMICBASE:NO")
         .arg("/Fo:")
         .arg(format!("tests/programs/obj/{}/", architecture.name()))
         .arg("/Fe:")
