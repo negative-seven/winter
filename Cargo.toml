@@ -1,5 +1,11 @@
 [workspace]
-members = ["hooks", "shared", "winter"]
+members = [
+    "hooks",
+    "shared",
+    "winter",
+    "winter/tests/utilities",
+    "winter/tests/utilities_macros",
+]
 resolver = "2"
 
 [workspace.lints.rust]
