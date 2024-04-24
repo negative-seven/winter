@@ -1,6 +1,7 @@
 use crate::state::{self, State, STATE};
 use minhook::MinHook;
 use ntapi::ntpsapi::{NtSetInformationThread, ThreadHideFromDebugger, THREADINFOCLASS};
+use shared::process;
 use std::{collections::BTreeMap, sync::RwLock};
 use winapi::{
     ctypes::c_void,
@@ -20,8 +21,9 @@ use winapi::{
         winnt::LARGE_INTEGER,
         winsock2::{socket, INVALID_SOCKET},
         winuser::{
-            GetAsyncKeyState, GetKeyState, GetKeyboardState, PeekMessageA, PeekMessageW, MSG,
-            PM_REMOVE, WM_CHAR, WM_KEYDOWN, WM_KEYUP,
+            GetAsyncKeyState, GetKeyState, GetKeyboardState, PeekMessageA, PeekMessageW,
+            RegisterClassExA, RegisterClassExW, MSG, PM_REMOVE, WM_ACTIVATE, WM_ACTIVATEAPP,
+            WM_CHAR, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_SETFOCUS, WNDCLASSEXA, WNDCLASSEXW,
         },
     },
 };
@@ -99,6 +101,18 @@ const HOOKS: &[(&str, &str, *const c_void)] = &[
         unsafe extern "system" fn(i32) -> i16,
     ),
     hook!("kernel32.dll", Sleep, sleep, unsafe extern "system" fn(u32)),
+    hook!(
+        "user32.dll",
+        RegisterClassExA,
+        register_class_ex_a,
+        unsafe extern "system" fn(*const WNDCLASSEXA) -> u16
+    ),
+    hook!(
+        "user32.dll",
+        RegisterClassExW,
+        register_class_ex_w,
+        unsafe extern "system" fn(*const WNDCLASSEXW) -> u16
+    ),
     hook!(
         "user32.dll",
         PeekMessageA,
@@ -211,8 +225,103 @@ unsafe extern "system" fn get_async_key_state(id: i32) -> i16 {
     unsafe { get_key_state(id) }
 }
 
-extern "system" fn sleep(milliseconds: u32) {
+unsafe extern "system" fn sleep(milliseconds: u32) {
     state::sleep(u64::from(milliseconds) * State::TICKS_PER_SECOND / 1000);
+}
+
+unsafe extern "system" fn register_class_ex_a(information: *const WNDCLASSEXA) -> u16 {
+    unsafe { register_class_ex(information, false) }
+}
+
+unsafe extern "system" fn register_class_ex_w(information: *const WNDCLASSEXW) -> u16 {
+    unsafe { register_class_ex(information.cast::<WNDCLASSEXA>(), true) }
+}
+
+// note: WNDCLASSEXA and WNDCLASSEXW are nearly identical types, with the only
+// difference being that two *const i8 fields in WNDCLASSEXA are instead *const
+// u16 fields in WNDCLASSEXW
+unsafe fn register_class_ex(information: *const WNDCLASSEXA, unicode_strings: bool) -> u16 {
+    let mut new_information = unsafe { *information };
+    new_information.lpfnWndProc = new_information
+        .lpfnWndProc
+        .map(|original_window_procedure| {
+            // a wrapper which prepends the address of the trampoline as the first argument
+            #[cfg(target_pointer_width = "64")]
+            let hook_wrapper = {
+                let mut function = vec![
+                    // 0xeb, 0xfe,
+                    0x41, 0x51, // push r9
+                    0x48, 0x83, 0xec, 0x20, // sub rsp, 0x20
+                    0x4d, 0x89, 0xc1, // mov r9, r8
+                    0x49, 0x89, 0xd0, // mov r8, rdx
+                    0x48, 0x89, 0xca, // mov rdx, rcx
+                    0x48, 0xb9, 0, 0, 0, 0, 0, 0, 0, 0, // mov rcx, original_window_procedure
+                    0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, // mov rax, window_procedure
+                    0xff, 0xd0, // call rax
+                    0x48, 0x83, 0xc4, 0x28, // add rsp, 0x28
+                    0xc3,
+                ];
+                function[17..][..8]
+                    .copy_from_slice(&(original_window_procedure as usize).to_le_bytes());
+                function[27..][..8].copy_from_slice(&(window_procedure as usize).to_le_bytes());
+                function
+            };
+            #[cfg(target_pointer_width = "32")]
+            let hook_wrapper = {
+                let mut function = vec![
+                    0x58, // pop eax
+                    0x68, 0, 0, 0, 0,    // push original_window_procedure
+                    0x50, // push eax
+                    0xb8, 0, 0, 0, 0, // mov eax, window_procedure
+                    0xff, 0xe0, // jmp eax
+                ];
+                function[2..][..4]
+                    .copy_from_slice(&(original_window_procedure as usize).to_le_bytes());
+                function[8..][..4].copy_from_slice(&(window_procedure as usize).to_le_bytes());
+                function
+            };
+
+            let current_process = process::Process::get_current();
+            let hook_wrapper_pointer = current_process
+                .allocate_read_execute_memory(hook_wrapper.len())
+                .unwrap();
+            current_process
+                .write(hook_wrapper_pointer, &hook_wrapper)
+                .unwrap();
+
+            unsafe { std::mem::transmute(hook_wrapper_pointer) }
+        });
+
+    if unicode_strings {
+        let trampoline = get_trampoline!(
+            RegisterClassExW,
+            unsafe extern "system" fn(*const WNDCLASSEXW) -> u16
+        );
+        unsafe { trampoline(std::ptr::addr_of!(new_information).cast()) }
+    } else {
+        let trampoline = get_trampoline!(
+            RegisterClassExA,
+            unsafe extern "system" fn(*const WNDCLASSEXA) -> u16
+        );
+        unsafe { trampoline(&new_information) }
+    }
+}
+
+unsafe extern "system" fn window_procedure(
+    trampoline: unsafe extern "system" fn(HWND, u32, usize, isize) -> isize,
+    window: HWND,
+    message: u32,
+    w_parameter: usize,
+    l_parameter: isize,
+) -> isize {
+    if matches!(
+        message,
+        WM_SETFOCUS | WM_KILLFOCUS | WM_ACTIVATE | WM_ACTIVATEAPP
+    ) {
+        0
+    } else {
+        unsafe { trampoline(window, message, w_parameter, l_parameter) }
+    }
 }
 
 unsafe extern "system" fn peek_message_a(
@@ -253,7 +362,7 @@ unsafe extern "system" fn peek_message_w(
     }
 }
 
-unsafe extern "system" fn peek_message(
+unsafe fn peek_message(
     message: *mut MSG,
     window_filter: HWND,
     minimum_id_filter: u32,
@@ -310,9 +419,10 @@ unsafe extern "system" fn peek_message(
             flags,
         );
         if result != 0 && matches!((*message).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
-            (*message).message = 0;
+            0
+        } else {
+            result
         }
-        result
     }
 }
 

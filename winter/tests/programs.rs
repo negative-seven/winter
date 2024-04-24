@@ -449,6 +449,34 @@ async fn query_performance_counter_and_sleep(architecture: Architecture) -> Resu
     Ok(())
 }
 
+#[test_per_architecture]
+async fn register_class_ex_a(architecture: Architecture) -> Result<()> {
+    init_test();
+    let stdout = run_and_get_stdout(build("register_class_ex_a", architecture), "", &[])
+        .await?
+        .iter()
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(stdout, vec!["275\r\n"]);
+
+    Ok(())
+}
+
+#[test_per_architecture]
+async fn register_class_ex_w(architecture: Architecture) -> Result<()> {
+    init_test();
+    let stdout = run_and_get_stdout(build("register_class_ex_w", architecture), "", &[])
+        .await?
+        .iter()
+        .map(|b| String::from_utf8_lossy(b).to_string())
+        .collect::<Vec<_>>();
+
+    assert_eq!(stdout, vec!["275\r\n"]);
+
+    Ok(())
+}
+
 async fn helper_for_key_state_tests(
     program_name: impl AsRef<str>,
     architecture: Architecture,
