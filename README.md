@@ -12,7 +12,7 @@ Prerequisites:
 Run Winter with the following command:
 
 ```text
-cargo run <executable> [-m <movie>] [-a <command_line_string>]
+cargo run <executable> [-m <movie>] [-c <command_line_string>]
 ```
 
 For more detailed usage instructions, run Winter with the `--help` flag.

@@ -32,7 +32,7 @@ struct Arguments {
     ///
     /// If this argument is omitted, the command-line string will default to the
     /// executable path wrapped in quotes.
-    #[arg(name("command_line_string"), short('a'), long)]
+    #[arg(name("command_line_string"), short('c'), long)]
     #[allow(clippy::struct_field_names)]
     command_line_string: Option<OsString>,
 
