@@ -52,6 +52,7 @@ pub fn build(program_name: impl AsRef<str>, architecture: Architecture) -> PathB
         .arg(source_file_path)
         .arg("user32.lib")
         .arg("winmm.lib")
+        .args(["/I", "tests/programs/include"])
         .arg("/DYNAMICBASE:NO")
         .arg("/Fo:")
         .arg(format!("tests/programs/obj/{}/", architecture.name()))

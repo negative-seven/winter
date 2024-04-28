@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <windows.h>
 
+#include "create_window.h"
+
 LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w_parameter, LPARAM l_parameter)
 {
     switch (message)
@@ -20,25 +22,8 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w_parameter,
 
 int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, int show_command)
 {
-    WNDCLASS wc = {0};
-    wc.lpfnWndProc = window_procedure;
-    wc.hInstance = instance;
-    wc.lpszClassName = " ";
-    RegisterClass(&wc);
-
-    HWND window = CreateWindow(
-        wc.lpszClassName,
-        "",
-        0,
-        -10000,
-        -10000,
-        0,
-        0,
-        NULL,
-        NULL,
-        instance,
-        NULL);
-    if (window == NULL)
+    HWND window;
+    if (!create_window(&window, window_procedure))
     {
         return 1;
     }
