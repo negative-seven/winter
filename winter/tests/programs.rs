@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 use test_utilities::{build, Architecture};
-use test_utilities_macros::test_per_architecture;
+use test_utilities_macros::test_for;
 use tracing::info;
 use winter::InactiveState;
 
@@ -71,7 +71,7 @@ async fn run_and_get_stdout(
     Ok(stdout_by_instant)
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn stdout(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(build("stdout", architecture), "", &[]).await?;
@@ -79,7 +79,7 @@ async fn stdout(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn stdout_large(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(build("stdout_large", architecture), "", &[]).await?;
@@ -89,7 +89,7 @@ async fn stdout_large(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn command_line_string(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -102,7 +102,7 @@ async fn command_line_string(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_tick_count(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -128,7 +128,7 @@ async fn get_tick_count(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_tick_count_and_sleep(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -158,7 +158,7 @@ async fn get_tick_count_and_sleep(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_tick_count_64(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -184,7 +184,7 @@ async fn get_tick_count_64(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_tick_count_64_and_sleep(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -214,7 +214,7 @@ async fn get_tick_count_64_and_sleep(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn time_get_time(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -240,7 +240,7 @@ async fn time_get_time(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn time_get_time_and_sleep(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -270,7 +270,7 @@ async fn time_get_time_and_sleep(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_system_time_as_file_time(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -296,7 +296,7 @@ async fn get_system_time_as_file_time(architecture: Architecture) -> Result<()> 
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_system_time_as_file_time_and_sleep(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -326,7 +326,7 @@ async fn get_system_time_as_file_time_and_sleep(architecture: Architecture) -> R
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_system_time_precise_as_file_time(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -352,7 +352,7 @@ async fn get_system_time_precise_as_file_time(architecture: Architecture) -> Res
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_system_time_precise_as_file_time_and_sleep(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -385,7 +385,7 @@ async fn get_system_time_precise_as_file_time_and_sleep(architecture: Architectu
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn query_performance_counter(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -413,7 +413,7 @@ async fn query_performance_counter(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn query_performance_counter_and_sleep(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(
@@ -449,7 +449,7 @@ async fn query_performance_counter_and_sleep(architecture: Architecture) -> Resu
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn register_class_ex_a(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(build("register_class_ex_a", architecture), "", &[])
@@ -463,7 +463,7 @@ async fn register_class_ex_a(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn register_class_ex_w(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(build("register_class_ex_w", architecture), "", &[])
@@ -531,22 +531,21 @@ async fn helper_for_key_state_tests(
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_key_state(architecture: Architecture) -> Result<()> {
     helper_for_key_state_tests("get_key_state", architecture).await
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_async_key_state(architecture: Architecture) -> Result<()> {
     helper_for_key_state_tests("get_async_key_state", architecture).await
 }
-
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn get_keyboard_state(architecture: Architecture) -> Result<()> {
     helper_for_key_state_tests("get_keyboard_state", architecture).await
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn key_down_and_key_up(architecture: Architecture) -> Result<()> {
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
@@ -618,7 +617,7 @@ async fn key_down_and_key_up(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_per_architecture]
+#[test_for(architecture)]
 async fn nt_set_information_thread(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = run_and_get_stdout(build("nt_set_information_thread", architecture), "", &[])
