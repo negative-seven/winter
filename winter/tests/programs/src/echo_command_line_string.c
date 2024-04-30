@@ -1,7 +1,8 @@
 #include <stdio.h>
+#include <tchar.h>
 #include <windows.h>
 
 int main()
 {
-    printf("%s", GetCommandLineA());
+    _tprintf(TEXT("%s"), GetCommandLine());
 }

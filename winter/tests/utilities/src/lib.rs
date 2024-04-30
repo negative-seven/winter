@@ -31,6 +31,7 @@ pub struct Instance<'a> {
     program_name: &'a str,
     architecture: Architecture,
     command_line_string: OsString,
+    unicode_flag: bool,
     events: Vec<Event>,
 }
 
@@ -41,12 +42,18 @@ impl<'a> Instance<'a> {
             program_name,
             architecture,
             command_line_string: OsString::new(),
+            unicode_flag: false,
             events: Vec::new(),
         }
     }
 
     pub fn with_command_line_string(&mut self, string: OsString) -> &mut Self {
         self.command_line_string = string;
+        self
+    }
+
+    pub fn with_unicode_flag(&mut self, flag: bool) -> &mut Self {
+        self.unicode_flag = flag;
         self
     }
 
@@ -59,10 +66,21 @@ impl<'a> Instance<'a> {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join(format!("../programs/src/{}.c", self.program_name))
     }
+
+    fn object_file_path(&self) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../programs/obj/{}/{}/{}.exe",
+            self.architecture.name(),
+            if self.unicode_flag { "unicode" } else { "ansi" },
+            self.program_name,
+        ))
+    }
+
     fn binary_file_path(&self) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../programs/bin/{}/{}.exe",
+            "../programs/bin/{}/{}/{}.exe",
             self.architecture.name(),
+            if self.unicode_flag { "unicode" } else { "ansi" },
             self.program_name,
         ))
     }
@@ -137,21 +155,21 @@ impl<'a> Instance<'a> {
             }
         };
 
-        std::fs::create_dir_all(format!("tests/programs/obj/{}", self.architecture.name()))
-            .unwrap();
-        std::fs::create_dir_all(format!("tests/programs/bin/{}", self.architecture.name()))
-            .unwrap();
+        std::fs::create_dir_all(self.object_file_path().parent().unwrap()).unwrap();
+        std::fs::create_dir_all(self.binary_file_path().parent().unwrap()).unwrap();
         let command_output = Command::new("cl")
             .envs(environment_variables.clone())
             .arg(self.source_file_path())
             .arg("user32.lib")
             .arg("winmm.lib")
             .args(["/I", "tests/programs/include"])
+            .args([if self.unicode_flag { "/D" } else { "/U" }, "UNICODE"])
+            .args([if self.unicode_flag { "/D" } else { "/U" }, "_UNICODE"])
             .arg("/DYNAMICBASE:NO")
             .arg("/Fo:")
-            .arg(format!("tests/programs/obj/{}/", self.architecture.name()))
+            .arg(self.object_file_path())
             .arg("/Fe:")
-            .arg(format!("tests/programs/bin/{}/", self.architecture.name()))
+            .arg(self.binary_file_path())
             .output()
             .unwrap();
         print!("{}", String::from_utf8_lossy(&command_output.stdout));

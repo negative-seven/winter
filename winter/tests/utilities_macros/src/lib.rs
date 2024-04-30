@@ -50,7 +50,19 @@ pub fn test_for(
                     },
                 ]);
             }
-            _ => panic!("expected \"architecture\""),
+            "unicode" => {
+                variant_groups.push(vec![
+                    Variant {
+                        suffix: "_ansi",
+                        argument: quote!(false),
+                    },
+                    Variant {
+                        suffix: "_unicode",
+                        argument: quote!(true),
+                    },
+                ]);
+            }
+            _ => panic!("expected \"architecture\" or \"unicode\""),
         }
     }
 
@@ -62,14 +74,16 @@ pub fn test_for(
     let mut inner_function_argument_lists = Vec::new();
     for variant_combination in variant_groups.iter().multi_cartesian_product() {
         let mut outer_function_name = format_ident!("{inner_function_name}");
-        let mut inner_function_arguments = Vec::new();
+        let mut inner_function_argument_tokens = Vec::new();
+        let comma = quote!(,);
         for variant in variant_combination {
             outer_function_name = format_ident!("{outer_function_name}{}", variant.suffix);
-            inner_function_arguments.push(&variant.argument);
+            inner_function_argument_tokens.push(&variant.argument);
+            inner_function_argument_tokens.push(&comma);
         }
         outer_function_names.push(outer_function_name);
         inner_function_argument_lists.push(
-            inner_function_arguments
+            inner_function_argument_tokens
                 .into_iter()
                 .flat_map(|a| a.clone().into_iter())
                 .collect::<TokenStream>(),

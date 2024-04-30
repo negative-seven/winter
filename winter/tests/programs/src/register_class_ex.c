@@ -13,7 +13,7 @@ LRESULT __stdcall window_procedure(HWND window, UINT message, WPARAM w_parameter
     }
     else
     {
-        return DefWindowProcA(window, message, w_parameter, l_parameter);
+        return DefWindowProc(window, message, w_parameter, l_parameter);
     }
 }
 
@@ -24,9 +24,9 @@ int main()
     {
         return 1;
     }
-    SendMessageA(window, WM_SETFOCUS, 1234, 5678);
-    SendMessageA(window, WM_KILLFOCUS, 1234, 5678);
-    SendMessageA(window, WM_ACTIVATE, 1234, 5678);
-    SendMessageA(window, WM_ACTIVATEAPP, 1234, 5678);
-    SendMessageA(window, WM_TIMER, 1234, 5678);
+    SendMessage(window, WM_SETFOCUS, 1234, 5678);
+    SendMessage(window, WM_KILLFOCUS, 1234, 5678);
+    SendMessage(window, WM_ACTIVATE, 1234, 5678);
+    SendMessage(window, WM_ACTIVATEAPP, 1234, 5678);
+    SendMessage(window, WM_TIMER, 1234, 5678);
 }

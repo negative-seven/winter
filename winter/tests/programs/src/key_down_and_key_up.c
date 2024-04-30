@@ -20,7 +20,7 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w_parameter,
     }
 }
 
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, int show_command)
+int main()
 {
     HWND window;
     if (!create_window(&window, window_procedure))

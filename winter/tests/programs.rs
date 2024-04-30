@@ -30,10 +30,11 @@ async fn stdout_large(architecture: Architecture) -> Result<()> {
     Ok(())
 }
 
-#[test_for(architecture)]
-async fn command_line_string(architecture: Architecture) -> Result<()> {
+#[test_for(architecture, unicode)]
+async fn command_line_string(architecture: Architecture, unicode: bool) -> Result<()> {
     init_test();
     let stdout = Instance::new("echo_command_line_string", architecture)
+        .with_unicode_flag(unicode)
         .with_command_line_string("abcABC123!\"_".into())
         .stdout()
         .await?;
@@ -334,22 +335,11 @@ async fn query_performance_counter_and_sleep(architecture: Architecture) -> Resu
     Ok(())
 }
 
-#[test_for(architecture)]
-async fn register_class_ex_a(architecture: Architecture) -> Result<()> {
+#[test_for(architecture, unicode)]
+async fn register_class_ex(architecture: Architecture, unicode: bool) -> Result<()> {
     init_test();
-    let stdout = Instance::new("register_class_ex_a", architecture)
-        .stdout_from_utf8_lossy()
-        .await?;
-
-    assert_eq!(stdout, vec!["275\r\n"]);
-
-    Ok(())
-}
-
-#[test_for(architecture)]
-async fn register_class_ex_w(architecture: Architecture) -> Result<()> {
-    init_test();
-    let stdout = Instance::new("register_class_ex_w", architecture)
+    let stdout = Instance::new("register_class_ex", architecture)
+        .with_unicode_flag(unicode)
         .stdout_from_utf8_lossy()
         .await?;
 
@@ -421,14 +411,15 @@ async fn get_keyboard_state(architecture: Architecture) -> Result<()> {
     helper_for_key_state_tests("get_keyboard_state", architecture).await
 }
 
-#[test_for(architecture)]
-async fn key_down_and_key_up(architecture: Architecture) -> Result<()> {
+#[test_for(architecture, unicode)]
+async fn key_down_and_key_up(architecture: Architecture, unicode: bool) -> Result<()> {
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
     }
 
     init_test();
     let stdout = Instance::new("key_down_and_key_up", architecture)
+        .with_unicode_flag(unicode)
         .with_events([
             key_event(65, true),
             key_event(65, true),

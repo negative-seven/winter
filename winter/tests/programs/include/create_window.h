@@ -3,23 +3,23 @@
 
 bool create_window(HWND *window, WNDPROC window_procedure)
 {
-    HMODULE module = GetModuleHandleA(NULL);
+    HMODULE module = GetModuleHandle(NULL);
     if (module == NULL)
     {
         return false;
     }
 
-    WNDCLASSEXA class_information = {0};
+    WNDCLASSEX class_information = {0};
     class_information.cbSize = sizeof(class_information);
     class_information.lpfnWndProc = window_procedure;
     class_information.hInstance = module;
-    class_information.lpszClassName = " ";
-    if (RegisterClassExA(&class_information) == 0)
+    class_information.lpszClassName = TEXT(" ");
+    if (RegisterClassEx(&class_information) == 0)
     {
         return false;
     }
 
-    *window = CreateWindowA(
+    *window = CreateWindow(
         class_information.lpszClassName,
         "",
         WS_OVERLAPPED,
