@@ -21,9 +21,10 @@ use winapi::{
         winnt::LARGE_INTEGER,
         winsock2::{socket, INVALID_SOCKET},
         winuser::{
-            GetAsyncKeyState, GetKeyState, GetKeyboardState, PeekMessageA, PeekMessageW,
-            RegisterClassExA, RegisterClassExW, MSG, PM_REMOVE, WM_ACTIVATE, WM_ACTIVATEAPP,
-            WM_CHAR, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_SETFOCUS, WNDCLASSEXA, WNDCLASSEXW,
+            GetAsyncKeyState, GetKeyState, GetKeyboardState, GetMessageA, GetMessageW,
+            PeekMessageA, PeekMessageW, RegisterClassExA, RegisterClassExW, MSG, PM_REMOVE,
+            WM_ACTIVATE, WM_ACTIVATEAPP, WM_CHAR, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_QUIT,
+            WM_SETFOCUS, WNDCLASSEXA, WNDCLASSEXW,
         },
     },
 };
@@ -124,6 +125,18 @@ const HOOKS: &[(&str, &str, *const c_void)] = &[
         PeekMessageW,
         peek_message_w,
         unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32,
+    ),
+    hook!(
+        "user32.dll",
+        GetMessageA,
+        get_message_a,
+        unsafe extern "system" fn(*mut MSG, HWND, u32, u32) -> i32
+    ),
+    hook!(
+        "user32.dll",
+        GetMessageW,
+        get_message_w,
+        unsafe extern "system" fn(*mut MSG, HWND, u32, u32) -> i32
     ),
     hook!(
         "kernel32.dll",
@@ -423,6 +436,74 @@ unsafe fn peek_message(
         } else {
             result
         }
+    }
+}
+
+unsafe extern "system" fn get_message_a(
+    message: *mut MSG,
+    window_filter: HWND,
+    minimum_id_filter: u32,
+    maximum_id_filter: u32,
+) -> i32 {
+    unsafe {
+        get_message(
+            message,
+            window_filter,
+            minimum_id_filter,
+            maximum_id_filter,
+            false,
+        )
+    }
+}
+
+unsafe extern "system" fn get_message_w(
+    message: *mut MSG,
+    window_filter: HWND,
+    minimum_id_filter: u32,
+    maximum_id_filter: u32,
+) -> i32 {
+    unsafe {
+        get_message(
+            message,
+            window_filter,
+            minimum_id_filter,
+            maximum_id_filter,
+            true,
+        )
+    }
+}
+
+unsafe fn get_message(
+    message: *mut MSG,
+    window_filter: HWND,
+    minimum_id_filter: u32,
+    maximum_id_filter: u32,
+    unicode_strings: bool,
+) -> i32 {
+    let peek_message = if unicode_strings {
+        PeekMessageW
+    } else {
+        PeekMessageA
+    };
+
+    loop {
+        unsafe {
+            if peek_message(
+                message,
+                window_filter,
+                minimum_id_filter,
+                maximum_id_filter,
+                PM_REMOVE,
+            ) != 0
+            {
+                if (*message).message == WM_QUIT {
+                    return 0;
+                }
+                return 1;
+            }
+        }
+
+        state::sleep_indefinitely();
     }
 }
 

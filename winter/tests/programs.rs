@@ -412,13 +412,13 @@ async fn get_keyboard_state(architecture: Architecture) -> Result<()> {
 }
 
 #[test_for(architecture, unicode)]
-async fn key_down_and_key_up(architecture: Architecture, unicode: bool) -> Result<()> {
+async fn peek_message_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
     }
 
     init_test();
-    let stdout = Instance::new("key_down_and_key_up", architecture)
+    let stdout = Instance::new("peek_message_with_key_messages", architecture)
         .with_unicode_flag(unicode)
         .with_events([
             key_event(65, true),
@@ -469,6 +469,74 @@ async fn key_down_and_key_up(architecture: Architecture, unicode: bool) -> Resul
                 "KEYUP 68 c0000001"
             ],
             &["KEYUP 40 80000001", "KEYDOWN 40 00000001"],
+        ]
+        .map(|item| if item.is_empty() {
+            String::new()
+        } else {
+            item.join("\r\n") + "\r\n"
+        })
+    );
+    Ok(())
+}
+
+#[test_for(architecture, unicode)]
+async fn get_message_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
+    fn key_event(id: u8, state: bool) -> Event {
+        Event::SetKeyState { id, state }
+    }
+
+    init_test();
+    let stdout = Instance::new("get_message_with_key_messages", architecture)
+        .with_unicode_flag(unicode)
+        .with_events([
+            key_event(65, true),
+            key_event(65, true),
+            key_event(66, true),
+            key_event(67, true),
+            Event::AdvanceTime(Duration::from_millis(12)),
+            key_event(65, true),
+            key_event(67, true),
+            Event::AdvanceTime(Duration::from_millis(34)),
+            key_event(68, true),
+            key_event(67, false),
+            key_event(67, false),
+            Event::AdvanceTime(Duration::from_millis(56)),
+            key_event(37, true),
+            key_event(65, false),
+            key_event(37, false),
+            key_event(66, false),
+            key_event(68, false),
+            Event::AdvanceTime(Duration::from_millis(78)),
+            key_event(40, false),
+            key_event(40, true),
+            Event::AdvanceTime(Duration::from_millis(90)),
+        ])
+        .stdout_from_utf8_lossy()
+        .await?;
+    assert_eq!(
+        stdout,
+        [
+            &[] as &[&str],
+            &[
+                "12 KEYDOWN 65 00000001",
+                "12 KEYDOWN 65 40000001",
+                "12 KEYDOWN 66 00000001",
+                "12 KEYDOWN 67 00000001",
+            ],
+            &["46 KEYDOWN 65 40000001", "46 KEYDOWN 67 40000001"],
+            &[
+                "102 KEYDOWN 68 00000001",
+                "102 KEYUP 67 c0000001",
+                "102 KEYUP 67 80000001",
+            ],
+            &[
+                "180 KEYDOWN 37 00000001",
+                "180 KEYUP 65 c0000001",
+                "180 KEYUP 37 c0000001",
+                "180 KEYUP 66 c0000001",
+                "180 KEYUP 68 c0000001"
+            ],
+            &["270 KEYUP 40 80000001", "270 KEYDOWN 40 00000001"],
         ]
         .map(|item| if item.is_empty() {
             String::new()
