@@ -40,7 +40,7 @@ int main_debuggee(int argc, char *argv[])
     HANDLE debugger_process;
     {
         char arguments[32];
-        sprintf(arguments, "- %d %d", GetCurrentProcessId(), GetCurrentThreadId());
+        sprintf_s(arguments, sizeof(arguments), "- %d %d", GetCurrentProcessId(), GetCurrentThreadId());
         STARTUPINFOA startup_info = {0};
         startup_info.cb = sizeof(startup_info);
         PROCESS_INFORMATION process_information;

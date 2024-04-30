@@ -166,6 +166,8 @@ impl<'a> Instance<'a> {
             .args([if self.unicode_flag { "/D" } else { "/U" }, "UNICODE"])
             .args([if self.unicode_flag { "/D" } else { "/U" }, "_UNICODE"])
             .arg("/DYNAMICBASE:NO")
+            .arg("/W3")
+            .arg("/WX")
             .arg("/Fo:")
             .arg(self.object_file_path())
             .arg("/Fe:")

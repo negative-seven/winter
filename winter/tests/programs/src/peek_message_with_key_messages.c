@@ -12,7 +12,7 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w_parameter,
         return 0;
     case WM_KEYDOWN:
     case WM_KEYUP:
-        printf("%s %d %08x\n", (message == WM_KEYDOWN ? "KEYDOWN" : "KEYUP"), w_parameter, l_parameter);
+        printf("%s %Id %08Ix\n", (message == WM_KEYDOWN ? "KEYDOWN" : "KEYUP"), w_parameter, l_parameter);
         fflush(stdout);
         return 0;
     default:

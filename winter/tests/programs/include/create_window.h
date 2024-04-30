@@ -21,7 +21,7 @@ bool create_window(HWND *window, WNDPROC window_procedure)
 
     *window = CreateWindow(
         class_information.lpszClassName,
-        "",
+        TEXT(""),
         WS_OVERLAPPED,
         -10000,
         -10000,
