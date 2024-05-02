@@ -69,7 +69,7 @@ impl<'a> Instance<'a> {
 
     fn object_file_path(&self) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(format!(
-            "../programs/obj/{}/{}/{}.exe",
+            "../programs/obj/{}/{}/{}.obj",
             self.architecture.name(),
             if self.unicode_flag { "unicode" } else { "ansi" },
             self.program_name,
