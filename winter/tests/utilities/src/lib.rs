@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use std::{
+    collections::BTreeMap,
     ffi::OsString,
     path::{Path, PathBuf},
     process::Command,
@@ -141,6 +142,20 @@ impl<'a> Instance<'a> {
     fn build(&self) {
         static ENVIRONMENT_VARIABLES_X86: OnceLock<Vec<(OsString, OsString)>> = OnceLock::new();
         static ENVIRONMENT_VARIABLES_X64: OnceLock<Vec<(OsString, OsString)>> = OnceLock::new();
+        static BINARY_FILE_MUTEXES: Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>> =
+            Mutex::new(BTreeMap::new());
+
+        // avoid building the same program multiple times at once, preventing needless
+        // recompilation and attempts to access .obj and .exe files while locked
+        let binary_file_mutex = {
+            let mut binary_file_mutexes = BINARY_FILE_MUTEXES.lock().unwrap();
+            Arc::clone(
+                binary_file_mutexes
+                    .entry(self.binary_file_path())
+                    .or_insert_with(|| Arc::new(Mutex::new(()))),
+            )
+        };
+        let _binary_file_lock = binary_file_mutex.lock().unwrap();
 
         if !self.should_build() {
             return;
