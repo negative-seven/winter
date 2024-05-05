@@ -5,19 +5,9 @@
 
 LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w_parameter, LPARAM l_parameter)
 {
-    switch (message)
-    {
-    case WM_DESTROY:
-        PostQuitMessage(0);
-        return 0;
-    case WM_KEYDOWN:
-    case WM_KEYUP:
-        printf("%d %s %Id %08Ix\n", GetTickCount(), (message == WM_KEYDOWN ? "KEYDOWN" : "KEYUP"), w_parameter, l_parameter);
-        fflush(stdout);
-        return 0;
-    default:
-        return DefWindowProc(window, message, w_parameter, l_parameter);
-    }
+    printf("%u %u %Iu %Iu\n", GetTickCount(), message, w_parameter, l_parameter);
+    fflush(stdout);
+    return DefWindowProc(window, message, w_parameter, l_parameter);
 }
 
 int main()

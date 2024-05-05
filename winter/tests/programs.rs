@@ -411,138 +411,202 @@ async fn get_keyboard_state(architecture: Architecture) -> Result<()> {
     helper_for_key_state_tests("get_keyboard_state", architecture).await
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct Message {
+    milliseconds: u32,
+    id: u32,
+    w_parameter: usize,
+    l_parameter: isize,
+}
+
+impl Message {
+    fn new(milliseconds: u32, id: u32, w_parameter: usize, l_parameter: isize) -> Self {
+        Self {
+            milliseconds,
+            id,
+            w_parameter,
+            l_parameter,
+        }
+    }
+}
+
+fn extract_messages_from_stdout(stdout: &[Vec<u8>], message_ids: &[u32]) -> Vec<Vec<Message>> {
+    stdout
+        .iter()
+        .map(|stdout_group| {
+            String::from_utf8_lossy(stdout_group)
+                .lines()
+                .filter_map(|line| {
+                    let mut tokens = line.split_ascii_whitespace();
+                    let milliseconds = tokens.next().unwrap().parse().unwrap();
+                    let id = tokens.next().unwrap().parse().unwrap();
+                    if !message_ids.contains(&id) {
+                        return None;
+                    }
+                    let w_parameter = tokens.next().unwrap().parse().unwrap();
+                    let l_parameter = tokens.next().unwrap().parse().unwrap();
+                    Some(Message {
+                        milliseconds,
+                        id,
+                        w_parameter,
+                        l_parameter,
+                    })
+                })
+                .collect()
+        })
+        .collect()
+}
+
 #[test_for(architecture, unicode)]
 async fn peek_message_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
+    const WM_KEYDOWN: u32 = 256;
+    const WM_KEYUP: u32 = 257;
+
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
     }
 
     init_test();
-    let stdout = Instance::new("peek_message_with_key_messages", architecture)
-        .with_unicode_flag(unicode)
-        .with_events([
-            key_event(65, true),
-            key_event(65, true),
-            key_event(66, true),
-            key_event(67, true),
-            Event::AdvanceTime(Duration::from_millis(77)),
-            key_event(65, true),
-            key_event(67, true),
-            Event::AdvanceTime(Duration::from_millis(18)),
-            key_event(68, true),
-            key_event(67, false),
-            key_event(67, false),
-            Event::AdvanceTime(Duration::from_millis(1)),
-            key_event(37, true),
-            key_event(65, false),
-            key_event(37, false),
-            key_event(66, false),
-            key_event(68, false),
-            Event::AdvanceTime(Duration::from_millis(1)),
-            key_event(40, false),
-            key_event(40, true),
-            Event::AdvanceTime(Duration::from_millis(3)),
-        ])
-        .stdout_from_utf8_lossy()
-        .await?;
+    let messages = extract_messages_from_stdout(
+        &Instance::new("peek_message", architecture)
+            .with_unicode_flag(unicode)
+            .with_events([
+                key_event(65, true),
+                key_event(65, true),
+                key_event(66, true),
+                key_event(67, true),
+                Event::AdvanceTime(Duration::from_millis(77)),
+                key_event(65, true),
+                key_event(67, true),
+                Event::AdvanceTime(Duration::from_millis(18)),
+                key_event(68, true),
+                key_event(67, false),
+                key_event(67, false),
+                Event::AdvanceTime(Duration::from_millis(1)),
+                key_event(37, true),
+                key_event(65, false),
+                key_event(37, false),
+                key_event(66, false),
+                key_event(68, false),
+                Event::AdvanceTime(Duration::from_millis(1)),
+                key_event(40, false),
+                key_event(40, true),
+                Event::AdvanceTime(Duration::from_millis(3)),
+            ])
+            .stdout()
+            .await?,
+        &[WM_KEYDOWN, WM_KEYUP],
+    );
+
+    let message = Message::new;
     assert_eq!(
-        stdout,
+        messages,
         [
-            &[] as &[&str],
+            &[] as &[Message],
             &[
-                "KEYDOWN 65 00000001",
-                "KEYDOWN 65 40000001",
-                "KEYDOWN 66 00000001",
-                "KEYDOWN 67 00000001",
-            ],
-            &["KEYDOWN 65 40000001", "KEYDOWN 67 40000001"],
-            &[
-                "KEYDOWN 68 00000001",
-                "KEYUP 67 c0000001",
-                "KEYUP 67 80000001",
+                message(1, WM_KEYDOWN, 65, 1),
+                message(1, WM_KEYDOWN, 65, (1 << 30) | 1),
+                message(1, WM_KEYDOWN, 66, 1),
+                message(1, WM_KEYDOWN, 67, 1),
             ],
             &[
-                "KEYDOWN 37 00000001",
-                "KEYUP 65 c0000001",
-                "KEYUP 37 c0000001",
-                "KEYUP 66 c0000001",
-                "KEYUP 68 c0000001"
+                message(78, WM_KEYDOWN, 65, (1 << 30) | 1),
+                message(78, WM_KEYDOWN, 67, (1 << 30) | 1)
             ],
-            &["KEYUP 40 80000001", "KEYDOWN 40 00000001"],
+            &[
+                message(96, WM_KEYDOWN, 68, 1),
+                message(96, WM_KEYUP, 67, (1 << 31) | (1 << 30) | 1),
+                message(96, WM_KEYUP, 67, (1 << 31) | 1),
+            ],
+            &[
+                message(97, WM_KEYDOWN, 37, 1),
+                message(97, WM_KEYUP, 65, (1 << 31) | (1 << 30) | 1),
+                message(97, WM_KEYUP, 37, (1 << 31) | (1 << 30) | 1),
+                message(97, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
+                message(97, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1)
+            ],
+            &[
+                message(98, WM_KEYUP, 40, (1 << 31) | 1),
+                message(98, WM_KEYDOWN, 40, 1)
+            ],
         ]
-        .map(|item| if item.is_empty() {
-            String::new()
-        } else {
-            item.join("\r\n") + "\r\n"
-        })
     );
     Ok(())
 }
 
 #[test_for(architecture, unicode)]
 async fn get_message_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
+    const WM_KEYDOWN: u32 = 256;
+    const WM_KEYUP: u32 = 257;
+
     fn key_event(id: u8, state: bool) -> Event {
         Event::SetKeyState { id, state }
     }
 
     init_test();
-    let stdout = Instance::new("get_message_with_key_messages", architecture)
-        .with_unicode_flag(unicode)
-        .with_events([
-            key_event(65, true),
-            key_event(65, true),
-            key_event(66, true),
-            key_event(67, true),
-            Event::AdvanceTime(Duration::from_millis(12)),
-            key_event(65, true),
-            key_event(67, true),
-            Event::AdvanceTime(Duration::from_millis(34)),
-            key_event(68, true),
-            key_event(67, false),
-            key_event(67, false),
-            Event::AdvanceTime(Duration::from_millis(56)),
-            key_event(37, true),
-            key_event(65, false),
-            key_event(37, false),
-            key_event(66, false),
-            key_event(68, false),
-            Event::AdvanceTime(Duration::from_millis(78)),
-            key_event(40, false),
-            key_event(40, true),
-            Event::AdvanceTime(Duration::from_millis(90)),
-        ])
-        .stdout_from_utf8_lossy()
-        .await?;
+    let messages = extract_messages_from_stdout(
+        &Instance::new("get_message", architecture)
+            .with_unicode_flag(unicode)
+            .with_events([
+                key_event(65, true),
+                key_event(65, true),
+                key_event(66, true),
+                key_event(67, true),
+                Event::AdvanceTime(Duration::from_millis(12)),
+                key_event(65, true),
+                key_event(67, true),
+                Event::AdvanceTime(Duration::from_millis(34)),
+                key_event(68, true),
+                key_event(67, false),
+                key_event(67, false),
+                Event::AdvanceTime(Duration::from_millis(56)),
+                key_event(37, true),
+                key_event(65, false),
+                key_event(37, false),
+                key_event(66, false),
+                key_event(68, false),
+                Event::AdvanceTime(Duration::from_millis(78)),
+                key_event(40, false),
+                key_event(40, true),
+                Event::AdvanceTime(Duration::from_millis(90)),
+            ])
+            .stdout()
+            .await?,
+        &[WM_KEYDOWN, WM_KEYUP],
+    );
+
+    let message = Message::new;
     assert_eq!(
-        stdout,
+        messages,
         [
-            &[] as &[&str],
+            &[] as &[Message],
             &[
-                "12 KEYDOWN 65 00000001",
-                "12 KEYDOWN 65 40000001",
-                "12 KEYDOWN 66 00000001",
-                "12 KEYDOWN 67 00000001",
-            ],
-            &["46 KEYDOWN 65 40000001", "46 KEYDOWN 67 40000001"],
-            &[
-                "102 KEYDOWN 68 00000001",
-                "102 KEYUP 67 c0000001",
-                "102 KEYUP 67 80000001",
+                message(12, WM_KEYDOWN, 65, 1),
+                message(12, WM_KEYDOWN, 65, (1 << 30) | 1),
+                message(12, WM_KEYDOWN, 66, 1),
+                message(12, WM_KEYDOWN, 67, 1),
             ],
             &[
-                "180 KEYDOWN 37 00000001",
-                "180 KEYUP 65 c0000001",
-                "180 KEYUP 37 c0000001",
-                "180 KEYUP 66 c0000001",
-                "180 KEYUP 68 c0000001"
+                message(46, WM_KEYDOWN, 65, (1 << 30) | 1),
+                message(46, WM_KEYDOWN, 67, (1 << 30) | 1)
             ],
-            &["270 KEYUP 40 80000001", "270 KEYDOWN 40 00000001"],
+            &[
+                message(102, WM_KEYDOWN, 68, 1),
+                message(102, WM_KEYUP, 67, (1 << 31) | (1 << 30) | 1),
+                message(102, WM_KEYUP, 67, (1 << 31) | 1),
+            ],
+            &[
+                message(180, WM_KEYDOWN, 37, 1),
+                message(180, WM_KEYUP, 65, (1 << 31) | (1 << 30) | 1),
+                message(180, WM_KEYUP, 37, (1 << 31) | (1 << 30) | 1),
+                message(180, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
+                message(180, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1)
+            ],
+            &[
+                message(270, WM_KEYUP, 40, (1 << 31) | 1),
+                message(270, WM_KEYDOWN, 40, 1)
+            ],
         ]
-        .map(|item| if item.is_empty() {
-            String::new()
-        } else {
-            item.join("\r\n") + "\r\n"
-        })
     );
     Ok(())
 }
