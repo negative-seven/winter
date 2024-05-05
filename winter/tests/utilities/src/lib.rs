@@ -86,7 +86,16 @@ impl<'a> Instance<'a> {
         ))
     }
 
-    pub async fn stdout(&self) -> Result<Vec<Vec<u8>>> {
+    pub async fn stdout(&self) -> Result<Vec<u8>> {
+        Ok(self
+            .stdout_by_instant()
+            .await?
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
+    pub async fn stdout_by_instant(&self) -> Result<Vec<Vec<u8>>> {
         self.build();
 
         let stdout = Arc::new(Mutex::new(Vec::new()));
@@ -130,9 +139,13 @@ impl<'a> Instance<'a> {
         Ok(stdout_by_instant)
     }
 
-    pub async fn stdout_from_utf8_lossy(&self) -> Result<Vec<String>> {
+    pub async fn stdout_from_utf8_lossy(&self) -> Result<String> {
+        Ok(String::from_utf8_lossy(&self.stdout().await?).to_string())
+    }
+
+    pub async fn stdout_by_instant_from_utf8_lossy(&self) -> Result<Vec<String>> {
         Ok(self
-            .stdout()
+            .stdout_by_instant()
             .await?
             .iter()
             .map(|b| String::from_utf8_lossy(b).to_string())

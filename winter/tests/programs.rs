@@ -16,7 +16,7 @@ fn init_test() {
 async fn stdout(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = Instance::new("stdout", architecture).stdout().await?;
-    assert_eq!(stdout, vec![b"abcABC123!\"_\x99\xaa\xbb"]);
+    assert_eq!(stdout, b"abcABC123!\"_\x99\xaa\xbb");
     Ok(())
 }
 
@@ -24,9 +24,8 @@ async fn stdout(architecture: Architecture) -> Result<()> {
 async fn stdout_large(architecture: Architecture) -> Result<()> {
     init_test();
     let stdout = Instance::new("stdout_large", architecture).stdout().await?;
-    assert_eq!(stdout.len(), 1);
-    assert_eq!(stdout[0].len(), 1024 * 1024 - 1);
-    assert!(stdout[0].iter().all(|&byte| byte == b's'));
+    assert_eq!(stdout.len(), 1024 * 1024 - 1);
+    assert!(stdout.iter().all(|&byte| byte == b's'));
     Ok(())
 }
 
@@ -38,7 +37,7 @@ async fn command_line_string(architecture: Architecture, unicode: bool) -> Resul
         .with_command_line_string("abcABC123!\"_".into())
         .stdout()
         .await?;
-    assert_eq!(stdout, vec![b"abcABC123!\"_"]);
+    assert_eq!(stdout, b"abcABC123!\"_");
     Ok(())
 }
 
@@ -50,7 +49,7 @@ async fn get_tick_count(architecture: Architecture) -> Result<()> {
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 30.0)),
         ])
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     assert_eq!(
         stdout,
@@ -76,7 +75,7 @@ async fn get_tick_count_and_sleep(architecture: Architecture) -> Result<()> {
             .into_iter()
             .cloned(),
         )
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
 
     let mut expected_stdout = Vec::new();
@@ -97,7 +96,7 @@ async fn get_tick_count_64(architecture: Architecture) -> Result<()> {
             Event::AdvanceTime(Duration::from_secs_f64(0.1)),
             Event::AdvanceTime(Duration::from_secs_f64(0.2)),
         ])
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     assert_eq!(
         stdout,
@@ -123,7 +122,7 @@ async fn get_tick_count_64_and_sleep(architecture: Architecture) -> Result<()> {
             .into_iter()
             .cloned(),
         )
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
 
     let mut expected_stdout = Vec::new();
@@ -144,7 +143,7 @@ async fn time_get_time(architecture: Architecture) -> Result<()> {
             Event::AdvanceTime(Duration::from_secs_f64(100.0)),
             Event::AdvanceTime(Duration::from_secs_f64(0.001)),
         ])
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     assert_eq!(
         stdout,
@@ -170,7 +169,7 @@ async fn time_get_time_and_sleep(architecture: Architecture) -> Result<()> {
             .into_iter()
             .cloned(),
         )
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
 
     let mut expected_stdout = Vec::new();
@@ -191,7 +190,7 @@ async fn get_system_time_as_file_time(architecture: Architecture) -> Result<()> 
             Event::AdvanceTime(Duration::from_secs_f64(2.0 / 3.0)),
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 3.0)),
         ])
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     assert_eq!(
         stdout,
@@ -217,7 +216,7 @@ async fn get_system_time_as_file_time_and_sleep(architecture: Architecture) -> R
             .into_iter()
             .cloned(),
         )
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
 
     let mut expected_stdout = Vec::new();
@@ -238,7 +237,7 @@ async fn get_system_time_precise_as_file_time(architecture: Architecture) -> Res
             Event::AdvanceTime(Duration::from_secs_f64(2.0 / 5.0)),
             Event::AdvanceTime(Duration::from_secs_f64(17.0 / 100.0)),
         ])
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     assert_eq!(
         stdout,
@@ -267,7 +266,7 @@ async fn get_system_time_precise_as_file_time_and_sleep(architecture: Architectu
         .into_iter()
         .cloned(),
     )
-    .stdout_from_utf8_lossy()
+    .stdout_by_instant_from_utf8_lossy()
     .await?;
 
     let mut expected_stdout = Vec::new();
@@ -288,7 +287,7 @@ async fn query_performance_counter(architecture: Architecture) -> Result<()> {
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 25.0)),
             Event::AdvanceTime(Duration::from_secs_f64(1.0 / 50.0)),
         ])
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     let frequency =
         str::parse::<u64>(stdout[0].lines().next().unwrap().split_once('/').unwrap().1).unwrap();
@@ -316,7 +315,7 @@ async fn query_performance_counter_and_sleep(architecture: Architecture) -> Resu
             .into_iter()
             .cloned(),
         )
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     let frequency =
         str::parse::<u64>(stdout[0].lines().next().unwrap().split_once('/').unwrap().1).unwrap();
@@ -343,7 +342,7 @@ async fn register_class_ex(architecture: Architecture, unicode: bool) -> Result<
         .stdout_from_utf8_lossy()
         .await?;
 
-    assert_eq!(stdout, vec!["275\r\n"]);
+    assert_eq!(stdout, "275\r\n");
 
     Ok(())
 }
@@ -381,7 +380,7 @@ async fn helper_for_key_state_tests(
             key_event(40, true),
             Event::AdvanceTime(Duration::from_millis(20)),
         ])
-        .stdout_from_utf8_lossy()
+        .stdout_by_instant_from_utf8_lossy()
         .await?;
     assert_eq!(
         stdout,
@@ -430,29 +429,24 @@ impl Message {
     }
 }
 
-fn extract_messages_from_stdout(stdout: &[Vec<u8>], message_ids: &[u32]) -> Vec<Vec<Message>> {
-    stdout
-        .iter()
-        .map(|stdout_group| {
-            String::from_utf8_lossy(stdout_group)
-                .lines()
-                .filter_map(|line| {
-                    let mut tokens = line.split_ascii_whitespace();
-                    let milliseconds = tokens.next().unwrap().parse().unwrap();
-                    let id = tokens.next().unwrap().parse().unwrap();
-                    if !message_ids.contains(&id) {
-                        return None;
-                    }
-                    let w_parameter = tokens.next().unwrap().parse().unwrap();
-                    let l_parameter = tokens.next().unwrap().parse().unwrap();
-                    Some(Message {
-                        milliseconds,
-                        id,
-                        w_parameter,
-                        l_parameter,
-                    })
-                })
-                .collect()
+fn extract_messages_from_stdout(stdout: &[u8], message_ids: &[u32]) -> Vec<Message> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut tokens = line.split_ascii_whitespace();
+            let milliseconds = tokens.next().unwrap().parse().unwrap();
+            let id = tokens.next().unwrap().parse().unwrap();
+            if !message_ids.contains(&id) {
+                return None;
+            }
+            let w_parameter = tokens.next().unwrap().parse().unwrap();
+            let l_parameter = tokens.next().unwrap().parse().unwrap();
+            Some(Message {
+                milliseconds,
+                id,
+                w_parameter,
+                l_parameter,
+            })
         })
         .collect()
 }
@@ -502,33 +496,22 @@ async fn peek_message_with_key_messages(architecture: Architecture, unicode: boo
     assert_eq!(
         messages,
         [
-            &[] as &[Message],
-            &[
-                message(1, WM_KEYDOWN, 65, 1),
-                message(1, WM_KEYDOWN, 65, (1 << 30) | 1),
-                message(1, WM_KEYDOWN, 66, 1),
-                message(1, WM_KEYDOWN, 67, 1),
-            ],
-            &[
-                message(78, WM_KEYDOWN, 65, (1 << 30) | 1),
-                message(78, WM_KEYDOWN, 67, (1 << 30) | 1)
-            ],
-            &[
-                message(96, WM_KEYDOWN, 68, 1),
-                message(96, WM_KEYUP, 67, (1 << 31) | (1 << 30) | 1),
-                message(96, WM_KEYUP, 67, (1 << 31) | 1),
-            ],
-            &[
-                message(97, WM_KEYDOWN, 37, 1),
-                message(97, WM_KEYUP, 65, (1 << 31) | (1 << 30) | 1),
-                message(97, WM_KEYUP, 37, (1 << 31) | (1 << 30) | 1),
-                message(97, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
-                message(97, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1)
-            ],
-            &[
-                message(98, WM_KEYUP, 40, (1 << 31) | 1),
-                message(98, WM_KEYDOWN, 40, 1)
-            ],
+            message(1, WM_KEYDOWN, 65, 1),
+            message(1, WM_KEYDOWN, 65, (1 << 30) | 1),
+            message(1, WM_KEYDOWN, 66, 1),
+            message(1, WM_KEYDOWN, 67, 1),
+            message(78, WM_KEYDOWN, 65, (1 << 30) | 1),
+            message(78, WM_KEYDOWN, 67, (1 << 30) | 1),
+            message(96, WM_KEYDOWN, 68, 1),
+            message(96, WM_KEYUP, 67, (1 << 31) | (1 << 30) | 1),
+            message(96, WM_KEYUP, 67, (1 << 31) | 1),
+            message(97, WM_KEYDOWN, 37, 1),
+            message(97, WM_KEYUP, 65, (1 << 31) | (1 << 30) | 1),
+            message(97, WM_KEYUP, 37, (1 << 31) | (1 << 30) | 1),
+            message(97, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
+            message(97, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1),
+            message(98, WM_KEYUP, 40, (1 << 31) | 1),
+            message(98, WM_KEYDOWN, 40, 1)
         ]
     );
     Ok(())
@@ -579,33 +562,22 @@ async fn get_message_with_key_messages(architecture: Architecture, unicode: bool
     assert_eq!(
         messages,
         [
-            &[] as &[Message],
-            &[
-                message(12, WM_KEYDOWN, 65, 1),
-                message(12, WM_KEYDOWN, 65, (1 << 30) | 1),
-                message(12, WM_KEYDOWN, 66, 1),
-                message(12, WM_KEYDOWN, 67, 1),
-            ],
-            &[
-                message(46, WM_KEYDOWN, 65, (1 << 30) | 1),
-                message(46, WM_KEYDOWN, 67, (1 << 30) | 1)
-            ],
-            &[
-                message(102, WM_KEYDOWN, 68, 1),
-                message(102, WM_KEYUP, 67, (1 << 31) | (1 << 30) | 1),
-                message(102, WM_KEYUP, 67, (1 << 31) | 1),
-            ],
-            &[
-                message(180, WM_KEYDOWN, 37, 1),
-                message(180, WM_KEYUP, 65, (1 << 31) | (1 << 30) | 1),
-                message(180, WM_KEYUP, 37, (1 << 31) | (1 << 30) | 1),
-                message(180, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
-                message(180, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1)
-            ],
-            &[
-                message(270, WM_KEYUP, 40, (1 << 31) | 1),
-                message(270, WM_KEYDOWN, 40, 1)
-            ],
+            message(12, WM_KEYDOWN, 65, 1),
+            message(12, WM_KEYDOWN, 65, (1 << 30) | 1),
+            message(12, WM_KEYDOWN, 66, 1),
+            message(12, WM_KEYDOWN, 67, 1),
+            message(46, WM_KEYDOWN, 65, (1 << 30) | 1),
+            message(46, WM_KEYDOWN, 67, (1 << 30) | 1),
+            message(102, WM_KEYDOWN, 68, 1),
+            message(102, WM_KEYUP, 67, (1 << 31) | (1 << 30) | 1),
+            message(102, WM_KEYUP, 67, (1 << 31) | 1),
+            message(180, WM_KEYDOWN, 37, 1),
+            message(180, WM_KEYUP, 65, (1 << 31) | (1 << 30) | 1),
+            message(180, WM_KEYUP, 37, (1 << 31) | (1 << 30) | 1),
+            message(180, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
+            message(180, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1),
+            message(270, WM_KEYUP, 40, (1 << 31) | 1),
+            message(270, WM_KEYDOWN, 40, 1)
         ]
     );
     Ok(())
@@ -617,6 +589,6 @@ async fn nt_set_information_thread(architecture: Architecture) -> Result<()> {
     let stdout = Instance::new("nt_set_information_thread", architecture)
         .stdout_from_utf8_lossy()
         .await?;
-    assert_eq!(stdout, vec!["start\r\nbreakpoint\r\nend\r\n"]);
+    assert_eq!(stdout, "start\r\nbreakpoint\r\nend\r\n");
     Ok(())
 }
