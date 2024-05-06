@@ -190,7 +190,18 @@ pub enum ConductorMessage {
     Resume,
     AdvanceTime(Duration),
     SetKeyState { id: u8, state: bool },
+    SetMousePosition { x: u16, y: u16 },
+    SetMouseButtonState { button: MouseButton, state: bool },
     IdleRequest,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    X1,
+    X2,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

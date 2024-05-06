@@ -1,3 +1,5 @@
+pub use shared::communication::MouseButton;
+
 use anyhow::Result;
 use shared::{
     communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
@@ -131,6 +133,28 @@ impl Conductor {
         Ok(())
     }
 
+    pub async fn set_mouse_position(
+        &mut self,
+        x: u16,
+        y: u16,
+    ) -> Result<(), SetMousePositionError> {
+        self.message_sender
+            .send(&ConductorMessage::SetMousePosition { x, y })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn set_mouse_button_state(
+        &mut self,
+        button: MouseButton,
+        state: bool,
+    ) -> Result<(), SetMouseButtonStateError> {
+        self.message_sender
+            .send(&ConductorMessage::SetMouseButtonState { button, state })
+            .await?;
+        Ok(())
+    }
+
     pub async fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
         self.message_sender
             .send(&ConductorMessage::AdvanceTime(time))
@@ -231,6 +255,18 @@ pub enum ResumeError {
 #[derive(Debug, Error)]
 #[error("error occurred while setting key state")]
 pub enum SetKeyStateError {
+    MessageSend(#[from] communication::SendError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while setting key state")]
+pub enum SetMousePositionError {
+    MessageSend(#[from] communication::SendError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while setting key state")]
+pub enum SetMouseButtonStateError {
     MessageSend(#[from] communication::SendError),
 }
 

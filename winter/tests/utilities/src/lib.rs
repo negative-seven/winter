@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 use tracing::info;
+use winter::MouseButton;
 
 #[derive(Clone, Copy)]
 pub enum Architecture {
@@ -123,14 +124,20 @@ impl<'a> Instance<'a> {
         .await?;
         conductor.resume().await?;
         for event in &self.events {
-            match event {
+            match *event {
                 Event::AdvanceTime(duration) => {
                     assert!(conductor.wait_until_inactive().await? == winter::InactiveState::Idle);
                     stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
-                    conductor.advance_time(*duration).await?;
+                    conductor.advance_time(duration).await?;
                 }
                 Event::SetKeyState { id, state } => {
-                    conductor.set_key_state(*id, *state).await?;
+                    conductor.set_key_state(id, state).await?;
+                }
+                Event::SetMousePosition { x, y } => {
+                    conductor.set_mouse_position(x, y).await?;
+                }
+                Event::SetMouseButtonState { button, state } => {
+                    conductor.set_mouse_button_state(button, state).await?;
                 }
             }
         }
@@ -261,4 +268,6 @@ impl<'a> Instance<'a> {
 pub enum Event {
     AdvanceTime(Duration),
     SetKeyState { id: u8, state: bool },
+    SetMousePosition { x: u16, y: u16 },
+    SetMouseButtonState { button: MouseButton, state: bool },
 }

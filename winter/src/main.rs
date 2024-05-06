@@ -7,7 +7,7 @@ use std::{
 };
 use tokio::time::sleep;
 use tracing::info;
-use winter::Conductor;
+use winter::{Conductor, MouseButton};
 
 #[derive(clap::Parser)]
 struct Arguments {
@@ -71,11 +71,29 @@ async fn main() -> Result<()> {
     if let Some(movie_path) = arguments.movie_path {
         for line in std::fs::read_to_string(movie_path)?.lines() {
             let mut tokens = line.split_ascii_whitespace();
-            match tokens.next().unwrap().to_lowercase().as_str() {
+            match &*tokens.next().unwrap().to_lowercase() {
                 "key" => {
                     let key_id = tokens.next().unwrap().parse::<u8>()?;
                     let key_state = tokens.next().unwrap().parse::<u8>()? != 0;
                     conductor.set_key_state(key_id, key_state).await?;
+                }
+                "mouse" => {
+                    let x = tokens.next().unwrap().parse::<u16>()?;
+                    let y = tokens.next().unwrap().parse::<u16>()?;
+                    conductor.set_mouse_position(x, y).await?;
+                }
+                "mouse_button" => {
+                    let button_name = tokens.next().unwrap().to_lowercase();
+                    let button = match &*button_name {
+                        "l" => MouseButton::Left,
+                        "r" => MouseButton::Right,
+                        "m" => MouseButton::Middle,
+                        "x1" => MouseButton::X1,
+                        "x2" => MouseButton::X2,
+                        _ => panic!("invalid mouse button: {button_name:?}"),
+                    };
+                    let state = tokens.next().unwrap().parse::<u8>()? != 0;
+                    conductor.set_mouse_button_state(button, state).await?;
                 }
                 "wait" => {
                     wait(

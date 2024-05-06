@@ -5,7 +5,9 @@ mod state;
 
 use futures::executor::block_on;
 use shared::{
-    communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
+    communication::{
+        self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel, MouseButton,
+    },
     event::ManualResetEvent,
     process, thread,
 };
@@ -19,6 +21,8 @@ static mut MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<HooksMessage>
 pub enum Event {
     AdvanceTime(Duration),
     SetKeyState { id: u8, state: bool },
+    SetMousePosition { x: u16, y: u16 },
+    SetMouseButtonState { button: MouseButton, state: bool },
     Idle,
 }
 
@@ -156,6 +160,12 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut Conductor
             }
             ConductorMessage::SetKeyState { id, state } => {
                 event_queue.enqueue(Event::SetKeyState { id, state });
+            }
+            ConductorMessage::SetMousePosition { x, y } => {
+                event_queue.enqueue(Event::SetMousePosition { x, y });
+            }
+            ConductorMessage::SetMouseButtonState { button, state } => {
+                event_queue.enqueue(Event::SetMouseButtonState { button, state });
             }
             ConductorMessage::IdleRequest => {
                 event_queue.enqueue(Event::Idle);

@@ -23,8 +23,10 @@ use winapi::{
         winuser::{
             GetAsyncKeyState, GetKeyState, GetKeyboardState, GetMessageA, GetMessageW,
             PeekMessageA, PeekMessageW, RegisterClassExA, RegisterClassExW, MSG, PM_REMOVE,
-            WM_ACTIVATE, WM_ACTIVATEAPP, WM_CHAR, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS, WM_QUIT,
-            WM_SETFOCUS, WNDCLASSEXA, WNDCLASSEXW,
+            WM_ACTIVATE, WM_ACTIVATEAPP, WM_CHAR, WM_KEYDOWN, WM_KEYUP, WM_KILLFOCUS,
+            WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEMOVE, WM_QUIT,
+            WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETFOCUS, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSEXA,
+            WNDCLASSEXW,
         },
     },
 };
@@ -431,7 +433,23 @@ unsafe fn peek_message(
             maximum_id_filter,
             flags,
         );
-        if result != 0 && matches!((*message).message, WM_KEYDOWN | WM_KEYUP | WM_CHAR) {
+        if result != 0
+            && matches!(
+                (*message).message,
+                WM_KEYDOWN
+                    | WM_KEYUP
+                    | WM_CHAR
+                    | WM_MOUSEMOVE
+                    | WM_LBUTTONDOWN
+                    | WM_LBUTTONUP
+                    | WM_RBUTTONDOWN
+                    | WM_RBUTTONUP
+                    | WM_MBUTTONDOWN
+                    | WM_MBUTTONUP
+                    | WM_XBUTTONDOWN
+                    | WM_XBUTTONUP
+            )
+        {
             0
         } else {
             result

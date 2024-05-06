@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::{sync::Once, time::Duration};
 use test_utilities::{Architecture, Event, Instance};
 use test_utilities_macros::test_for;
+use winter::MouseButton;
 
 fn init_test() {
     static ONCE: Once = Once::new();
@@ -511,7 +512,7 @@ async fn peek_message_with_key_messages(architecture: Architecture, unicode: boo
             message(97, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
             message(97, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1),
             message(98, WM_KEYUP, 40, (1 << 31) | 1),
-            message(98, WM_KEYDOWN, 40, 1)
+            message(98, WM_KEYDOWN, 40, 1),
         ]
     );
     Ok(())
@@ -577,7 +578,97 @@ async fn get_message_with_key_messages(architecture: Architecture, unicode: bool
             message(180, WM_KEYUP, 66, (1 << 31) | (1 << 30) | 1),
             message(180, WM_KEYUP, 68, (1 << 31) | (1 << 30) | 1),
             message(270, WM_KEYUP, 40, (1 << 31) | 1),
-            message(270, WM_KEYDOWN, 40, 1)
+            message(270, WM_KEYDOWN, 40, 1),
+        ]
+    );
+    Ok(())
+}
+
+#[test_for(architecture, unicode)]
+async fn peek_message_with_mouse_messages(architecture: Architecture, unicode: bool) -> Result<()> {
+    const WM_MOUSEMOVE: u32 = 512;
+    const WM_LBUTTONDOWN: u32 = 513;
+    const WM_LBUTTONUP: u32 = 514;
+    const WM_RBUTTONDOWN: u32 = 516;
+    const WM_RBUTTONUP: u32 = 517;
+    const WM_MBUTTONDOWN: u32 = 519;
+    const WM_MBUTTONUP: u32 = 520;
+    const WM_XBUTTONDOWN: u32 = 523;
+    const WM_XBUTTONUP: u32 = 524;
+
+    fn key_event(id: u8, state: bool) -> Event {
+        Event::SetKeyState { id, state }
+    }
+    fn button_event(button: MouseButton, state: bool) -> Event {
+        Event::SetMouseButtonState { button, state }
+    }
+
+    init_test();
+    let messages = extract_messages_from_stdout(
+        &Instance::new("peek_message", architecture)
+            .with_unicode_flag(unicode)
+            .with_events([
+                button_event(MouseButton::X1, true),
+                button_event(MouseButton::Left, true),
+                button_event(MouseButton::Middle, true),
+                button_event(MouseButton::X2, true),
+                button_event(MouseButton::Right, true),
+                button_event(MouseButton::Middle, false),
+                button_event(MouseButton::X2, false),
+                button_event(MouseButton::X1, false),
+                button_event(MouseButton::Right, false),
+                button_event(MouseButton::Left, false),
+                Event::SetMousePosition { x: 111, y: 222 },
+                button_event(MouseButton::Right, true),
+                Event::SetMousePosition { x: 44, y: 33 },
+                button_event(MouseButton::X1, true),
+                key_event(162, true),
+                button_event(MouseButton::X1, false),
+                key_event(161, true),
+                button_event(MouseButton::Right, false),
+                key_event(162, false),
+                button_event(MouseButton::X2, true),
+                key_event(161, false),
+                button_event(MouseButton::X2, false),
+                Event::AdvanceTime(Duration::from_millis(100)),
+            ])
+            .stdout()
+            .await?,
+        &[
+            WM_MOUSEMOVE,
+            WM_LBUTTONDOWN,
+            WM_LBUTTONUP,
+            WM_RBUTTONDOWN,
+            WM_RBUTTONUP,
+            WM_MBUTTONDOWN,
+            WM_MBUTTONUP,
+            WM_XBUTTONDOWN,
+            WM_XBUTTONUP,
+        ],
+    );
+
+    let message = |a, b, c| Message::new(1, a, b, c);
+    assert_eq!(
+        messages,
+        [
+            message(WM_XBUTTONDOWN, (1 << 16) | 0x20, 0),
+            message(WM_LBUTTONDOWN, 0x21, 0),
+            message(WM_MBUTTONDOWN, 0x31, 0),
+            message(WM_XBUTTONDOWN, (2 << 16) | 0x71, 0),
+            message(WM_RBUTTONDOWN, 0x73, 0),
+            message(WM_MBUTTONUP, 0x63, 0),
+            message(WM_XBUTTONUP, (2 << 16) | 0x23, 0),
+            message(WM_XBUTTONUP, (1 << 16) | 0x3, 0),
+            message(WM_RBUTTONUP, 0x1, 0),
+            message(WM_LBUTTONUP, 0x0, 0),
+            message(WM_MOUSEMOVE, 0x0, (222 << 16) | 111),
+            message(WM_RBUTTONDOWN, 0x2, (222 << 16) | 111),
+            message(WM_MOUSEMOVE, 0x2, (33 << 16) | 44),
+            message(WM_XBUTTONDOWN, (1 << 16) | 0x22, (33 << 16) | 44),
+            message(WM_XBUTTONUP, (1 << 16) | 0xa, (33 << 16) | 44),
+            message(WM_RBUTTONUP, 0xc, (33 << 16) | 44),
+            message(WM_XBUTTONDOWN, (2 << 16) | 0x44, (33 << 16) | 44),
+            message(WM_XBUTTONUP, 2 << 16, (33 << 16) | 44),
         ]
     );
     Ok(())
