@@ -112,6 +112,11 @@ int main_debugger(int argc, char *argv[])
         return 1;
     }
 
+    if (DebugSetProcessKillOnExit(FALSE) == 0)
+    {
+        return 1;
+    }
+
     HANDLE debuggee_thread = OpenThread(THREAD_ALL_ACCESS, FALSE, debuggee_thread_id);
     if (debuggee_thread == NULL)
     {
@@ -158,9 +163,11 @@ int main_debugger(int argc, char *argv[])
             {
                 return 1;
             }
-        }
-        else if (debug_event.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT)
-        {
+
+            if (ContinueDebugEvent(debug_event.dwProcessId, debug_event.dwThreadId, DBG_CONTINUE) == 0)
+            {
+                return 1;
+            }
             break;
         }
 
@@ -170,8 +177,11 @@ int main_debugger(int argc, char *argv[])
         }
     }
 
+    if (DebugActiveProcessStop(debuggee_process_id) == 0)
+    {
+        return 1;
+    }
     CloseHandle(debuggee_thread);
-
     return 0;
 }
 
