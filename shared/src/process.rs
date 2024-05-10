@@ -19,8 +19,8 @@ use winapi::{
         jobapi2::{AssignProcessToJobObject, SetInformationJobObject},
         memoryapi::{ReadProcessMemory, VirtualAllocEx, VirtualFreeEx, WriteProcessMemory},
         processthreadsapi::{
-            CreateProcessW, CreateRemoteThread, GetCurrentProcess, GetProcessId,
-            PROCESS_INFORMATION, STARTUPINFOW,
+            CreateProcessW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess,
+            GetProcessId, PROCESS_INFORMATION, STARTUPINFOW,
         },
         tlhelp32::{
             CreateToolhelp32Snapshot, Module32First, Module32Next, Thread32First, Thread32Next,
@@ -216,9 +216,13 @@ impl Process {
         Ok(())
     }
 
-    pub async fn join(&self) -> Result<(), JoinError> {
+    pub async fn join(&self) -> Result<u32, JoinError> {
         self.handle.wait().await?;
-        Ok(())
+        let mut exit_code = 0;
+        unsafe {
+            GetExitCodeProcess(self.handle.as_raw(), &mut exit_code);
+        }
+        Ok(exit_code)
     }
 
     pub fn get_id(&self) -> Result<u32, GetIdError> {

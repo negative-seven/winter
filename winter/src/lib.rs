@@ -177,11 +177,11 @@ impl Conductor {
                 InactiveState::Idle
             }
             result = self.process.join() => {
-                result?;
+                let exit_code = result?;
                 if let Some(task) = self.receive_messages_task.take() {
                     task.abort();
                 }
-                InactiveState::Terminated
+                InactiveState::Terminated { exit_code }
             }
             error = async {
                 loop {
@@ -209,7 +209,7 @@ impl Conductor {
 #[derive(Debug, Eq, PartialEq)]
 pub enum InactiveState {
     Idle,
-    Terminated,
+    Terminated { exit_code: u32 },
 }
 
 #[derive(Debug, Error)]

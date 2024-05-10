@@ -141,7 +141,13 @@ impl<'a> Instance<'a> {
                 }
             }
         }
-        assert!(conductor.wait_until_inactive().await? == winter::InactiveState::Terminated);
+        if let winter::InactiveState::Terminated { exit_code } =
+            conductor.wait_until_inactive().await?
+        {
+            assert!(exit_code == 0);
+        } else {
+            panic!("the final checked inactive state is not the terminated state")
+        }
         stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
         Ok(stdout_by_instant)
     }
