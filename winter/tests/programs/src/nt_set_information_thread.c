@@ -76,7 +76,6 @@ int main_debugger(int argc, char *argv[])
     ASSERT(debuggee_thread_id != 0)
 
     ASSERT_WINAPI(DebugActiveProcess(debuggee_process_id))
-    ASSERT_WINAPI(DebugSetProcessKillOnExit(FALSE))
 
     HANDLE debuggee_thread = OpenThread(THREAD_ALL_ACCESS, FALSE, debuggee_thread_id);
     ASSERT_WINAPI(debuggee_thread != NULL)
@@ -116,6 +115,7 @@ int main_debugger(int argc, char *argv[])
 
     ASSERT_WINAPI(DebugActiveProcessStop(debuggee_process_id))
     ASSERT_WINAPI(CloseHandle(debuggee_thread))
+    ASSERT_WINAPI(DebugSetProcessKillOnExit(FALSE))
     return 0;
 }
 
