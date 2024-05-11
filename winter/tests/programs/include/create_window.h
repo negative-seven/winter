@@ -1,23 +1,21 @@
+#pragma once
+
 #include <stdbool.h>
 #include <windows.h>
 
-bool create_window(HWND *window, WNDPROC window_procedure)
+#include "assert.h"
+
+void create_window(HWND *window, WNDPROC window_procedure)
 {
     HMODULE module = GetModuleHandle(NULL);
-    if (module == NULL)
-    {
-        return false;
-    }
+    ASSERT_WINAPI(module != NULL)
 
     WNDCLASSEX class_information = {0};
     class_information.cbSize = sizeof(class_information);
     class_information.lpfnWndProc = window_procedure;
     class_information.hInstance = module;
     class_information.lpszClassName = TEXT(" ");
-    if (RegisterClassEx(&class_information) == 0)
-    {
-        return false;
-    }
+    ASSERT_WINAPI(RegisterClassEx(&class_information))
 
     *window = CreateWindow(
         class_information.lpszClassName,
@@ -31,10 +29,5 @@ bool create_window(HWND *window, WNDPROC window_procedure)
         NULL,
         module,
         NULL);
-    if (*window == NULL)
-    {
-        return false;
-    }
-
-    return true;
+    ASSERT_WINAPI(*window != NULL)
 }

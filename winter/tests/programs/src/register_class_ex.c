@@ -20,10 +20,7 @@ LRESULT __stdcall window_procedure(HWND window, UINT message, WPARAM w_parameter
 int main()
 {
     HWND window;
-    if (!create_window(&window, window_procedure))
-    {
-        return 1;
-    }
+    create_window(&window, window_procedure);
     SendMessage(window, WM_SETFOCUS, 1234, 5678);
     SendMessage(window, WM_KILLFOCUS, 1234, 5678);
     SendMessage(window, WM_ACTIVATE, 1234, 5678);

@@ -13,10 +13,7 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w_parameter,
 int main()
 {
     HWND window;
-    if (!create_window(&window, window_procedure))
-    {
-        return 1;
-    }
+    create_window(&window, window_procedure);
     ShowWindow(window, SW_SHOW);
 
     int key_message_count = 0;
@@ -24,10 +21,7 @@ int main()
     BOOL get_message_result;
     while ((get_message_result = GetMessage(&message, NULL, 0, 0)) != 0)
     {
-        if (get_message_result == -1)
-        {
-            return 1;
-        }
+        ASSERT_WINAPI(get_message_result != -1)
 
         TranslateMessage(&message);
         DispatchMessage(&message);

@@ -13,10 +13,7 @@ LRESULT CALLBACK window_procedure(HWND window, UINT message, WPARAM w_parameter,
 int main()
 {
     HWND window;
-    if (!create_window(&window, window_procedure))
-    {
-        return 1;
-    }
+    create_window(&window, window_procedure);
     ShowWindow(window, SW_SHOW);
 
     for (int i = 0; i < 100; i++)
