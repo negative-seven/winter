@@ -336,6 +336,53 @@ async fn query_performance_counter_and_sleep(architecture: Architecture) -> Resu
 }
 
 #[test_for(architecture, unicode)]
+async fn waitable_timer(architecture: Architecture, unicode: bool) -> Result<()> {
+    init_test();
+    let stdout = Instance::new("waitable_timer", architecture)
+        .with_unicode_flag(unicode)
+        .with_events([
+            Event::AdvanceTime(Duration::from_millis(1)),
+            Event::AdvanceTime(Duration::from_millis(4)),
+            Event::AdvanceTime(Duration::from_millis(9)),
+            Event::AdvanceTime(Duration::from_millis(16)),
+            Event::AdvanceTime(Duration::from_millis(25)),
+            Event::AdvanceTime(Duration::from_millis(67)),
+        ])
+        .stdout_from_utf8_lossy()
+        .await?;
+    assert_eq!(
+        stdout,
+        concat!(
+            "12 0\r\n",
+            "27 0\r\n",
+            "36 0\r\n",
+            "39 0\r\n",
+            "42 0\r\n",
+            "\r\n",
+            "50 1\r\n",
+            "59 1\r\n",
+            "60 1\r\n",
+            "61 1\r\n",
+            "62 1\r\n",
+            "\r\n",
+            "72 0\r\n",
+            "74 0\r\n",
+            "82 0\r\n",
+            "89 0\r\n",
+            "96 0\r\n",
+            "103 0\r\n",
+            "\r\n",
+            "112 1\r\n",
+            "117 1\r\n",
+            "121 1\r\n",
+            "122 1\r\n",
+            "\r\n",
+        )
+    );
+    Ok(())
+}
+
+#[test_for(architecture, unicode)]
 async fn register_class_ex(architecture: Architecture, unicode: bool) -> Result<()> {
     init_test();
     let stdout = Instance::new("register_class_ex", architecture)

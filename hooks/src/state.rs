@@ -1,7 +1,12 @@
 use crate::{hooks, log, Event, EVENT_QUEUE, MESSAGE_SENDER};
 use futures::executor::block_on;
 use shared::communication::{HooksMessage, LogLevel, MouseButton};
-use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    mem::MaybeUninit,
+    num::NonZeroU64,
+    sync::{Arc, Mutex},
+};
 use winapi::{
     shared::{
         ntdef::NULL,
@@ -24,15 +29,6 @@ pub(crate) struct MSGSend(pub(crate) MSG);
 
 unsafe impl Send for MSGSend {}
 
-pub(crate) struct State {
-    ticks: u64,
-    pending_ticks: u64,
-    busy_wait_count: u64,
-    key_states: [bool; 256],
-    pub(crate) mouse: MouseState,
-    pub(crate) custom_message_queue: VecDeque<MSGSend>,
-}
-
 #[allow(clippy::struct_excessive_bools)]
 pub(crate) struct MouseState {
     pub(crate) x: u16,
@@ -44,9 +40,36 @@ pub(crate) struct MouseState {
     x2_button: bool,
 }
 
+pub(crate) struct WaitableTimer {
+    pub(crate) reset_automatically: bool,
+    pub(crate) signaled: bool,
+    pub(crate) remaining_ticks: u64,
+    pub(crate) period_in_ticks: Option<NonZeroU64>,
+}
+
+impl WaitableTimer {
+    pub(crate) fn running(&self) -> bool {
+        self.remaining_ticks != 0
+    }
+}
+
+pub(crate) struct State {
+    ticks: u64,
+    pending_ticks: u64,
+    busy_wait_count: u64,
+    key_states: [bool; 256],
+    pub(crate) mouse: MouseState,
+    pub(crate) custom_message_queue: VecDeque<MSGSend>,
+    pub(crate) waitable_timer_handles: BTreeMap<u32, Arc<Mutex<WaitableTimer>>>,
+}
+
 impl State {
     pub(crate) const TICKS_PER_SECOND: u64 = 3000;
     const BUSY_WAIT_THRESHOLD: u64 = 100;
+
+    pub(crate) fn ticks(&self) -> u64 {
+        self.ticks
+    }
 
     pub(crate) fn get_key_state(&self, key_code: u8) -> bool {
         #[allow(clippy::cast_possible_truncation)]
@@ -96,6 +119,7 @@ pub(crate) static STATE: Mutex<State> = Mutex::new(State {
         x2_button: false,
     },
     custom_message_queue: VecDeque::new(),
+    waitable_timer_handles: BTreeMap::new(),
 });
 
 pub(crate) static mut MAIN_THREAD_ID: MaybeUninit<u32> = MaybeUninit::uninit();
@@ -130,16 +154,18 @@ pub(crate) fn sleep(ticks: u64) {
 
     let mut remaining_ticks = ticks;
     while remaining_ticks > 0 {
+        let ticks_advanced_by;
         {
             let mut state = STATE.lock().unwrap();
-            let ticks_advanced_by = u64::min(state.pending_ticks, remaining_ticks);
+            ticks_advanced_by = u64::min(state.pending_ticks, remaining_ticks);
             state.ticks += ticks_advanced_by;
             state.pending_ticks -= ticks_advanced_by;
-            remaining_ticks -= ticks_advanced_by;
-            if remaining_ticks == 0 {
-                state.busy_wait_count = 0;
-                break;
-            }
+        }
+        remaining_ticks -= ticks_advanced_by;
+        advance_timers(ticks_advanced_by);
+        if remaining_ticks == 0 {
+            STATE.lock().unwrap().busy_wait_count = 0;
+            break;
         }
         poll_events_for_sleep();
     }
@@ -155,14 +181,36 @@ pub(crate) fn sleep_indefinitely() {
     loop {
         {
             let mut state = STATE.lock().unwrap();
-            if state.pending_ticks > 0 {
-                state.ticks += state.pending_ticks;
+            let pending_ticks = state.pending_ticks;
+            if pending_ticks > 0 {
+                state.ticks += pending_ticks;
                 state.pending_ticks = 0;
                 state.busy_wait_count = 0;
+                drop(state);
+                advance_timers(pending_ticks);
                 break;
             }
         }
         poll_events_for_sleep();
+    }
+}
+
+fn advance_timers(ticks: u64) {
+    for timer in STATE.lock().unwrap().waitable_timer_handles.values() {
+        let mut timer = timer.lock().unwrap();
+        if timer.remaining_ticks > 0 {
+            let mut remaining_ticks = ticks;
+            let ticks_advanced_by = timer.remaining_ticks.min(remaining_ticks);
+            timer.remaining_ticks -= ticks_advanced_by;
+            remaining_ticks -= ticks_advanced_by;
+            if timer.remaining_ticks == 0 {
+                timer.signaled = true;
+                if let Some(period_in_ticks) = timer.period_in_ticks {
+                    remaining_ticks %= u64::from(period_in_ticks);
+                    timer.remaining_ticks = u64::from(period_in_ticks) - remaining_ticks;
+                }
+            }
+        }
     }
 }
 
