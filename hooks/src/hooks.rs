@@ -847,12 +847,10 @@ unsafe extern "system" fn set_waitable_timer_ex(
 #[allow(clippy::cast_sign_loss)]
 fn set_waitable_timer_shared(timer: *mut c_void, due_time: *const LARGE_INTEGER, period: i32) {
     let state = STATE.lock().unwrap();
-    let mut waitable_timer = state
-        .waitable_timer_handles
-        .get(&(timer as u32))
-        .unwrap()
-        .lock()
-        .unwrap();
+    let Some(waitable_timer) = state.waitable_timer_handles.get(&(timer as u32)) else {
+        return;
+    };
+    let mut waitable_timer = waitable_timer.lock().unwrap();
     waitable_timer.signaled = false;
     waitable_timer.period_in_ticks =
         NonZeroU64::new(period as u64 * State::TICKS_PER_SECOND / 1000);
