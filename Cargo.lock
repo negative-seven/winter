@@ -562,6 +562,7 @@ dependencies = [
  "anyhow",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "winter",
 ]
 

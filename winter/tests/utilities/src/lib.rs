@@ -8,11 +8,20 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     str::FromStr,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, Once, OnceLock},
     time::Duration,
 };
 use tracing::info;
 use winter::MouseButton;
+
+pub fn init_test() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .init();
+    });
+}
 
 #[derive(Clone, Copy)]
 pub enum Architecture {
