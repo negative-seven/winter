@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use anyhow::Result;
 use std::{sync::Once, time::Duration};
 use test_utilities::{Architecture, Event, Instance};
@@ -31,9 +33,9 @@ async fn stdout_large(architecture: Architecture) -> Result<()> {
 }
 
 #[test_for(architecture, unicode)]
-async fn command_line_string(architecture: Architecture, unicode: bool) -> Result<()> {
+async fn GetCommandLine(architecture: Architecture, unicode: bool) -> Result<()> {
     init_test();
-    let stdout = Instance::new("echo_command_line_string", architecture)
+    let stdout = Instance::new("GetCommandLine", architecture)
         .with_unicode_flag(unicode)
         .with_command_line_string("abcABC123!\"_".into())
         .stdout()
@@ -43,30 +45,9 @@ async fn command_line_string(architecture: Architecture, unicode: bool) -> Resul
 }
 
 #[test_for(architecture)]
-async fn get_tick_count(architecture: Architecture) -> Result<()> {
+async fn GetTickCount(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("get_tick_count", architecture)
-        .with_events([
-            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
-            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 30.0)),
-        ])
-        .stdout_by_instant_from_utf8_lossy()
-        .await?;
-    assert_eq!(
-        stdout,
-        vec![
-            "0\r\n".repeat(99),
-            "16\r\n".repeat(100),
-            "50\r\n".to_string()
-        ]
-    );
-    Ok(())
-}
-
-#[test_for(architecture)]
-async fn get_tick_count_and_sleep(architecture: Architecture) -> Result<()> {
-    init_test();
-    let stdout = Instance::new("get_tick_count_and_sleep", architecture)
+    let stdout = Instance::new("GetTickCount", architecture)
         .with_events(
             [
                 &Event::AdvanceTime(Duration::from_millis(78)),
@@ -90,12 +71,12 @@ async fn get_tick_count_and_sleep(architecture: Architecture) -> Result<()> {
 }
 
 #[test_for(architecture)]
-async fn get_tick_count_64(architecture: Architecture) -> Result<()> {
+async fn GetTickCount_busy_wait(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("get_tick_count_64", architecture)
+    let stdout = Instance::new("GetTickCount_busy_wait", architecture)
         .with_events([
-            Event::AdvanceTime(Duration::from_secs_f64(0.1)),
-            Event::AdvanceTime(Duration::from_secs_f64(0.2)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 60.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 30.0)),
         ])
         .stdout_by_instant_from_utf8_lossy()
         .await?;
@@ -103,17 +84,17 @@ async fn get_tick_count_64(architecture: Architecture) -> Result<()> {
         stdout,
         vec![
             "0\r\n".repeat(99),
-            "100\r\n".repeat(100),
-            "300\r\n".to_string()
+            "16\r\n".repeat(100),
+            "50\r\n".to_string()
         ]
     );
     Ok(())
 }
 
 #[test_for(architecture)]
-async fn get_tick_count_64_and_sleep(architecture: Architecture) -> Result<()> {
+async fn GetTickCount64(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("get_tick_count_64_and_sleep", architecture)
+    let stdout = Instance::new("GetTickCount64", architecture)
         .with_events(
             [
                 &Event::AdvanceTime(Duration::from_millis(206)),
@@ -137,12 +118,12 @@ async fn get_tick_count_64_and_sleep(architecture: Architecture) -> Result<()> {
 }
 
 #[test_for(architecture)]
-async fn time_get_time(architecture: Architecture) -> Result<()> {
+async fn GetTickCount64_busy_wait(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("time_get_time", architecture)
+    let stdout = Instance::new("GetTickCount64_busy_wait", architecture)
         .with_events([
-            Event::AdvanceTime(Duration::from_secs_f64(100.0)),
-            Event::AdvanceTime(Duration::from_secs_f64(0.001)),
+            Event::AdvanceTime(Duration::from_secs_f64(0.1)),
+            Event::AdvanceTime(Duration::from_secs_f64(0.2)),
         ])
         .stdout_by_instant_from_utf8_lossy()
         .await?;
@@ -150,17 +131,17 @@ async fn time_get_time(architecture: Architecture) -> Result<()> {
         stdout,
         vec![
             "0\r\n".repeat(99),
-            "100000\r\n".repeat(100),
-            "100001\r\n".to_string()
+            "100\r\n".repeat(100),
+            "300\r\n".to_string()
         ]
     );
     Ok(())
 }
 
 #[test_for(architecture)]
-async fn time_get_time_and_sleep(architecture: Architecture) -> Result<()> {
+async fn timeGetTime(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("time_get_time_and_sleep", architecture)
+    let stdout = Instance::new("timeGetTime", architecture)
         .with_events(
             [
                 &Event::AdvanceTime(Duration::from_millis(40)),
@@ -184,30 +165,30 @@ async fn time_get_time_and_sleep(architecture: Architecture) -> Result<()> {
 }
 
 #[test_for(architecture)]
-async fn get_system_time_as_file_time(architecture: Architecture) -> Result<()> {
+async fn timeGetTime_busy_wait(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("get_system_time_as_file_time", architecture)
+    let stdout = Instance::new("timeGetTime_busy_wait", architecture)
         .with_events([
-            Event::AdvanceTime(Duration::from_secs_f64(2.0 / 3.0)),
-            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 3.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(100.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(0.001)),
         ])
         .stdout_by_instant_from_utf8_lossy()
         .await?;
     assert_eq!(
         stdout,
         vec![
-            "0 0\r\n".repeat(99),
-            "0 6666666\r\n".repeat(100),
-            "0 10000000\r\n".to_string()
+            "0\r\n".repeat(99),
+            "100000\r\n".repeat(100),
+            "100001\r\n".to_string()
         ]
     );
     Ok(())
 }
 
 #[test_for(architecture)]
-async fn get_system_time_as_file_time_and_sleep(architecture: Architecture) -> Result<()> {
+async fn GetSystemTimeAsFileTime(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("get_system_time_as_file_time_and_sleep", architecture)
+    let stdout = Instance::new("GetSystemTimeAsFileTime", architecture)
         .with_events(
             [
                 &Event::AdvanceTime(Duration::from_millis(192)),
@@ -231,9 +212,56 @@ async fn get_system_time_as_file_time_and_sleep(architecture: Architecture) -> R
 }
 
 #[test_for(architecture)]
-async fn get_system_time_precise_as_file_time(architecture: Architecture) -> Result<()> {
+async fn GetSystemTimeAsFileTime_busy_wait(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("get_system_time_precise_as_file_time", architecture)
+    let stdout = Instance::new("GetSystemTimeAsFileTime_busy_wait", architecture)
+        .with_events([
+            Event::AdvanceTime(Duration::from_secs_f64(2.0 / 3.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 3.0)),
+        ])
+        .stdout_by_instant_from_utf8_lossy()
+        .await?;
+    assert_eq!(
+        stdout,
+        vec![
+            "0 0\r\n".repeat(99),
+            "0 6666666\r\n".repeat(100),
+            "0 10000000\r\n".to_string()
+        ]
+    );
+    Ok(())
+}
+
+#[test_for(architecture)]
+async fn GetSystemTimePreciseAsFileTime(architecture: Architecture) -> Result<()> {
+    init_test();
+    let stdout = Instance::new("GetSystemTimePreciseAsFileTime", architecture)
+        .with_events(
+            [
+                &Event::AdvanceTime(Duration::from_millis(6)),
+                &Event::AdvanceTime(Duration::from_millis(1)),
+            ]
+            .repeat(10)
+            .into_iter()
+            .cloned(),
+        )
+        .stdout_by_instant_from_utf8_lossy()
+        .await?;
+
+    let mut expected_stdout = Vec::new();
+    for index in 0..10 {
+        expected_stdout.push(format!("0 {}\r\n", index * 70_000));
+        expected_stdout.push(String::new());
+    }
+    expected_stdout.push(String::new());
+    assert_eq!(stdout, expected_stdout);
+    Ok(())
+}
+
+#[test_for(architecture)]
+async fn GetSystemTimePreciseAsFileTime_busy_wait(architecture: Architecture) -> Result<()> {
+    init_test();
+    let stdout = Instance::new("GetSystemTimePreciseAsFileTime_busy_wait", architecture)
         .with_events([
             Event::AdvanceTime(Duration::from_secs_f64(2.0 / 5.0)),
             Event::AdvanceTime(Duration::from_secs_f64(17.0 / 100.0)),
@@ -252,61 +280,9 @@ async fn get_system_time_precise_as_file_time(architecture: Architecture) -> Res
 }
 
 #[test_for(architecture)]
-async fn get_system_time_precise_as_file_time_and_sleep(architecture: Architecture) -> Result<()> {
+async fn QueryPerformanceCounter(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new(
-        "get_system_time_precise_as_file_time_and_sleep",
-        architecture,
-    )
-    .with_events(
-        [
-            &Event::AdvanceTime(Duration::from_millis(6)),
-            &Event::AdvanceTime(Duration::from_millis(1)),
-        ]
-        .repeat(10)
-        .into_iter()
-        .cloned(),
-    )
-    .stdout_by_instant_from_utf8_lossy()
-    .await?;
-
-    let mut expected_stdout = Vec::new();
-    for index in 0..10 {
-        expected_stdout.push(format!("0 {}\r\n", index * 70_000));
-        expected_stdout.push(String::new());
-    }
-    expected_stdout.push(String::new());
-    assert_eq!(stdout, expected_stdout);
-    Ok(())
-}
-
-#[test_for(architecture)]
-async fn query_performance_counter(architecture: Architecture) -> Result<()> {
-    init_test();
-    let stdout = Instance::new("query_performance_counter", architecture)
-        .with_events([
-            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 25.0)),
-            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 50.0)),
-        ])
-        .stdout_by_instant_from_utf8_lossy()
-        .await?;
-    let frequency =
-        str::parse::<u64>(stdout[0].lines().next().unwrap().split_once('/').unwrap().1).unwrap();
-    assert_eq!(
-        stdout,
-        vec![
-            format!("{}/{}\r\n", 0, frequency).repeat(99),
-            format!("{}/{}\r\n", frequency / 25, frequency).repeat(100),
-            format!("{}/{}\r\n", frequency * 3 / 50, frequency).to_string()
-        ]
-    );
-    Ok(())
-}
-
-#[test_for(architecture)]
-async fn query_performance_counter_and_sleep(architecture: Architecture) -> Result<()> {
-    init_test();
-    let stdout = Instance::new("query_performance_counter_and_sleep", architecture)
+    let stdout = Instance::new("QueryPerformanceCounter", architecture)
         .with_events(
             [
                 &Event::AdvanceTime(Duration::from_millis(46)),
@@ -332,6 +308,29 @@ async fn query_performance_counter_and_sleep(architecture: Architecture) -> Resu
     }
     expected_stdout.push(String::new());
     assert_eq!(stdout, expected_stdout);
+    Ok(())
+}
+
+#[test_for(architecture)]
+async fn QueryPerformanceCounter_busy_wait(architecture: Architecture) -> Result<()> {
+    init_test();
+    let stdout = Instance::new("QueryPerformanceCounter_busy_wait", architecture)
+        .with_events([
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 25.0)),
+            Event::AdvanceTime(Duration::from_secs_f64(1.0 / 50.0)),
+        ])
+        .stdout_by_instant_from_utf8_lossy()
+        .await?;
+    let frequency =
+        str::parse::<u64>(stdout[0].lines().next().unwrap().split_once('/').unwrap().1).unwrap();
+    assert_eq!(
+        stdout,
+        vec![
+            format!("{}/{}\r\n", 0, frequency).repeat(99),
+            format!("{}/{}\r\n", frequency / 25, frequency).repeat(100),
+            format!("{}/{}\r\n", frequency * 3 / 50, frequency).to_string()
+        ]
+    );
     Ok(())
 }
 
@@ -383,9 +382,9 @@ async fn waitable_timer(architecture: Architecture, unicode: bool) -> Result<()>
 }
 
 #[test_for(architecture, unicode)]
-async fn register_class_ex(architecture: Architecture, unicode: bool) -> Result<()> {
+async fn RegisterClassEx(architecture: Architecture, unicode: bool) -> Result<()> {
     init_test();
-    let stdout = Instance::new("register_class_ex", architecture)
+    let stdout = Instance::new("RegisterClassEx", architecture)
         .with_unicode_flag(unicode)
         .stdout_from_utf8_lossy()
         .await?;
@@ -445,17 +444,17 @@ async fn helper_for_key_state_tests(
 }
 
 #[test_for(architecture)]
-async fn get_key_state(architecture: Architecture) -> Result<()> {
-    helper_for_key_state_tests("get_key_state", architecture).await
+async fn GetKeyState(architecture: Architecture) -> Result<()> {
+    helper_for_key_state_tests("GetKeyState", architecture).await
 }
 
 #[test_for(architecture)]
-async fn get_async_key_state(architecture: Architecture) -> Result<()> {
-    helper_for_key_state_tests("get_async_key_state", architecture).await
+async fn GetAsyncKeyState(architecture: Architecture) -> Result<()> {
+    helper_for_key_state_tests("GetAsyncKeyState", architecture).await
 }
 #[test_for(architecture)]
-async fn get_keyboard_state(architecture: Architecture) -> Result<()> {
-    helper_for_key_state_tests("get_keyboard_state", architecture).await
+async fn GetKeyboardState(architecture: Architecture) -> Result<()> {
+    helper_for_key_state_tests("GetKeyboardState", architecture).await
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -500,7 +499,7 @@ fn extract_messages_from_stdout(stdout: &[u8], message_ids: &[u32]) -> Vec<Messa
 }
 
 #[test_for(architecture, unicode)]
-async fn peek_message_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
+async fn PeekMessage_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
     const WM_KEYDOWN: u32 = 256;
     const WM_KEYUP: u32 = 257;
 
@@ -510,7 +509,7 @@ async fn peek_message_with_key_messages(architecture: Architecture, unicode: boo
 
     init_test();
     let messages = extract_messages_from_stdout(
-        &Instance::new("peek_message", architecture)
+        &Instance::new("PeekMessage", architecture)
             .with_unicode_flag(unicode)
             .with_events([
                 key_event(65, true),
@@ -566,7 +565,7 @@ async fn peek_message_with_key_messages(architecture: Architecture, unicode: boo
 }
 
 #[test_for(architecture, unicode)]
-async fn get_message_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
+async fn GetMessage_with_key_messages(architecture: Architecture, unicode: bool) -> Result<()> {
     const WM_KEYDOWN: u32 = 256;
     const WM_KEYUP: u32 = 257;
 
@@ -576,7 +575,7 @@ async fn get_message_with_key_messages(architecture: Architecture, unicode: bool
 
     init_test();
     let messages = extract_messages_from_stdout(
-        &Instance::new("get_message", architecture)
+        &Instance::new("GetMessage", architecture)
             .with_unicode_flag(unicode)
             .with_events([
                 key_event(65, true),
@@ -632,7 +631,7 @@ async fn get_message_with_key_messages(architecture: Architecture, unicode: bool
 }
 
 #[test_for(architecture, unicode)]
-async fn peek_message_with_mouse_messages(architecture: Architecture, unicode: bool) -> Result<()> {
+async fn PeekMessage_with_mouse_messages(architecture: Architecture, unicode: bool) -> Result<()> {
     const WM_MOUSEMOVE: u32 = 512;
     const WM_LBUTTONDOWN: u32 = 513;
     const WM_LBUTTONUP: u32 = 514;
@@ -652,7 +651,7 @@ async fn peek_message_with_mouse_messages(architecture: Architecture, unicode: b
 
     init_test();
     let messages = extract_messages_from_stdout(
-        &Instance::new("peek_message", architecture)
+        &Instance::new("PeekMessage", architecture)
             .with_unicode_flag(unicode)
             .with_events([
                 button_event(MouseButton::X1, true),
@@ -722,9 +721,9 @@ async fn peek_message_with_mouse_messages(architecture: Architecture, unicode: b
 }
 
 #[test_for(architecture)]
-async fn nt_set_information_thread(architecture: Architecture) -> Result<()> {
+async fn NtSetInformationThread(architecture: Architecture) -> Result<()> {
     init_test();
-    let stdout = Instance::new("nt_set_information_thread", architecture)
+    let stdout = Instance::new("NtSetInformationThread", architecture)
         .stdout_from_utf8_lossy()
         .await?;
     assert_eq!(stdout, "start\r\nbreakpoint\r\nend\r\n");
