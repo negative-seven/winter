@@ -9,6 +9,7 @@ use tokio::time::sleep;
 use tracing::info;
 use winter::{Conductor, MouseButton};
 
+#[expect(clippy::doc_markdown)]
 #[derive(clap::Parser)]
 struct Arguments {
     /// The executable to be run under Winter.
@@ -33,7 +34,6 @@ struct Arguments {
     /// If this argument is omitted, the command-line string will default to the
     /// executable path wrapped in quotes.
     #[arg(name("command_line_string"), short('c'), long)]
-    #[allow(clippy::struct_field_names)]
     command_line_string: Option<OsString>,
 
     /// An optional path to a movie file to be played.

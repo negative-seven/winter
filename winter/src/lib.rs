@@ -18,7 +18,7 @@ use tokio::select;
 
 pub struct Conductor {
     process: process::Process,
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
     message_sender: communication::Sender<ConductorMessage>,
@@ -228,11 +228,11 @@ pub enum NewError {
     CheckIs64Bit(#[from] CheckIs64BitError),
     KillOnCurrentProcessExit(#[from] process::KillOnCurrentProcessExitError),
     InjectDll(#[from] process::InjectDllError),
-    ProcessAllocate(#[source] std::io::Error),
-    ProcessWrite(#[source] std::io::Error),
+    ProcessAllocate(#[source] io::Error),
+    ProcessWrite(#[source] io::Error),
     GetExportAddress(#[from] process::GetExportAddressError),
     NewEvent(#[from] event::NewError),
-    ThreadCreate(#[source] std::io::Error),
+    ThreadCreate(#[source] io::Error),
     MessageReceive(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
     Bincode(#[from] bincode::Error),

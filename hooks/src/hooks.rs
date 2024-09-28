@@ -46,14 +46,12 @@ pub(crate) static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTr
 macro_rules! get_trampoline {
     ($name:expr, $type:ty $(,)?) => {{
         let mut f: $type;
-        #[allow(unused_assignments)]
+        #[expect(unused_assignments)]
         {
             f = $name; // type check
         }
-        #[allow(unused_unsafe)]
-        #[allow(unused_qualifications)]
         unsafe {
-            f = std::mem::transmute(
+            f = std::mem::transmute::<usize, $type>(
                 *crate::hooks::TRAMPOLINES
                     .read()
                     .unwrap()
@@ -74,24 +72,21 @@ fn set_trampoline(name: impl AsRef<str>, pointer: *const c_void) {
 }
 
 macro_rules! hook {
-    ($module:expr, $original:expr, $new:expr, $type:ty $(,)?) => {
-        #[allow(unused_qualifications)]
+    ($module:expr, $original:expr, $new:expr, $type:ty $(,)?) => {{
+        #[expect(unused_assignments)]
+        #[expect(unused_variables)]
         {
-            #[allow(unused_assignments)]
-            #[allow(unused_variables)]
-            {
-                let mut f: $type;
-                f = $original; // type check
-                f = $new; // type check
-            }
-
-            (
-                $module,
-                stringify!($original),
-                $new as *const winapi::ctypes::c_void,
-            )
+            let mut f: $type;
+            f = $original; // type check
+            f = $new; // type check
         }
-    };
+
+        (
+            $module,
+            stringify!($original),
+            $new as *const winapi::ctypes::c_void,
+        )
+    }};
 }
 
 const HOOKS: &[(&str, &str, *const c_void)] = &[
@@ -270,7 +265,7 @@ pub(crate) fn initialize() {
             function_name: &str,
             hook: *const c_void,
         ) -> Result<(), Box<dyn std::error::Error>> {
-            let process = shared::process::Process::get_current();
+            let process = process::Process::get_current();
             let function_address = process.get_export_address(module_name, function_name)?;
             unsafe {
                 let original_function = MinHook::create_hook(
@@ -297,8 +292,8 @@ unsafe extern "system" fn get_keyboard_state(key_states: *mut u8) -> i32 {
     1
 }
 
-#[allow(clippy::cast_possible_truncation)]
-#[allow(clippy::cast_sign_loss)]
+#[expect(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_sign_loss)]
 unsafe extern "system" fn get_key_state(id: i32) -> i16 {
     i16::from(STATE.lock().unwrap().get_key_state(id as u8)) << 15
 }
@@ -592,12 +587,12 @@ unsafe fn get_message(
     }
 }
 
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation)]
 extern "system" fn get_tick_count() -> u32 {
     (state::get_ticks_with_busy_wait() * 1000 / State::TICKS_PER_SECOND) as u32
 }
 
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation)]
 extern "system" fn get_tick_count_64() -> u64 {
     (u128::from(state::get_ticks_with_busy_wait()) * 1000 / u128::from(State::TICKS_PER_SECOND))
         as u64
@@ -610,7 +605,7 @@ extern "system" fn time_get_time() -> u32 {
 const SIMULATED_PERFORMANCE_COUNTER_FREQUENCY: u64 = 1 << 32;
 
 unsafe extern "system" fn query_performance_frequency(frequency: *mut LARGE_INTEGER) -> i32 {
-    #[allow(clippy::cast_possible_wrap)]
+    #[expect(clippy::cast_possible_wrap)]
     unsafe {
         *(*frequency).QuadPart_mut() = SIMULATED_PERFORMANCE_COUNTER_FREQUENCY as i64;
     }
@@ -619,7 +614,7 @@ unsafe extern "system" fn query_performance_frequency(frequency: *mut LARGE_INTE
 }
 
 unsafe extern "system" fn query_performance_counter(count: *mut LARGE_INTEGER) -> i32 {
-    #[allow(clippy::cast_possible_wrap)]
+    #[expect(clippy::cast_possible_wrap)]
     unsafe {
         let simulated_performance_counter = state::get_ticks_with_busy_wait()
             * SIMULATED_PERFORMANCE_COUNTER_FREQUENCY
@@ -631,7 +626,7 @@ unsafe extern "system" fn query_performance_counter(count: *mut LARGE_INTEGER) -
 }
 
 unsafe extern "system" fn get_system_time_as_file_time(file_time: *mut FILETIME) {
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     let one_hundred_nanosecond_intervals = (u128::from(state::get_ticks_with_busy_wait())
         * 10_000_000
         / u128::from(State::TICKS_PER_SECOND)) as u64;
@@ -844,7 +839,7 @@ unsafe extern "system" fn set_waitable_timer_ex(
     result
 }
 
-#[allow(clippy::cast_sign_loss)]
+#[expect(clippy::cast_sign_loss)]
 fn set_waitable_timer_shared(timer: *mut c_void, due_time: *const LARGE_INTEGER, period: i32) {
     let state = STATE.lock().unwrap();
     let Some(waitable_timer) = state.waitable_timer_handles.get(&(timer as u32)) else {

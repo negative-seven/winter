@@ -74,23 +74,20 @@ static mut EVENT_QUEUE: MaybeUninit<EventQueue> = MaybeUninit::uninit();
 
 macro_rules! log {
     ($level:expr, $($format_args:expr $(,)?),+) => {
-        #[allow(unused_qualifications)]
-        {
-            let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
-            futures::executor::block_on(message_sender
-                .lock()
-                .unwrap()
-                .send(&shared::communication::HooksMessage::Log {
-                    level: $level,
-                    message: format!($($format_args),+),
-                }))
-                .unwrap();
-        }
+        let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
+        futures::executor::block_on(message_sender
+            .lock()
+            .unwrap()
+            .send(&shared::communication::HooksMessage::Log {
+                level: $level,
+                message: format!($($format_args),+),
+            }))
+            .unwrap();
     };
 }
 pub(crate) use log;
 
-#[allow(clippy::missing_safety_doc)]
+#[expect(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "system" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
     let mut message_receiver;

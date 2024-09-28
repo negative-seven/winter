@@ -24,4 +24,6 @@ unused_macro_rules = "warn"
 unused_qualifications = "warn"
 
 [workspace.lints.clippy]
+allow_attributes = "warn"
 pedantic = "warn"
+unused_trait_names = "warn"

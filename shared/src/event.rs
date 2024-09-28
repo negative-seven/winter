@@ -15,7 +15,7 @@ use winapi::{
 };
 
 #[derive(Debug)]
-#[allow(clippy::module_name_repetitions)]
+#[expect(clippy::module_name_repetitions)]
 pub struct ManualResetEvent {
     handle: Handle,
 }
@@ -23,8 +23,8 @@ pub struct ManualResetEvent {
 impl ManualResetEvent {
     pub fn new() -> Result<Self, NewError> {
         let security_attributes = SECURITY_ATTRIBUTES {
-            #[allow(clippy::cast_possible_truncation)]
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            #[expect(clippy::cast_possible_truncation)]
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: NULL,
             bInheritHandle: TRUE,
         };

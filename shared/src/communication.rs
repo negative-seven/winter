@@ -43,7 +43,7 @@ impl<S: Serialize + Debug> Sender<S> {
     }
 
     #[must_use]
-    #[allow(clippy::missing_panics_doc)]
+    #[expect(clippy::missing_panics_doc)]
     pub unsafe fn from_bytes(bytes: [u8; 12]) -> Self {
         unsafe {
             let mut handles = bytes
@@ -60,7 +60,7 @@ impl<S: Serialize + Debug> Sender<S> {
     }
 
     #[must_use]
-    #[allow(clippy::missing_panics_doc)]
+    #[expect(clippy::missing_panics_doc)]
     pub unsafe fn leak_to_bytes(self) -> [u8; 12] {
         let bytes = unsafe {
             [
@@ -110,7 +110,7 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
     }
 
     #[must_use]
-    #[allow(clippy::missing_panics_doc)]
+    #[expect(clippy::missing_panics_doc)]
     pub unsafe fn from_bytes(bytes: [u8; 12]) -> Self {
         unsafe {
             let mut handles = bytes
@@ -127,7 +127,7 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
     }
 
     #[must_use]
-    #[allow(clippy::missing_panics_doc)]
+    #[expect(clippy::missing_panics_doc)]
     pub unsafe fn leak_to_bytes(self) -> [u8; 12] {
         let bytes = unsafe {
             [

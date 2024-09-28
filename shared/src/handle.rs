@@ -164,7 +164,7 @@ impl WaitHandle {
 impl Drop for WaitHandle {
     fn drop(&mut self) {
         unsafe {
-            #[allow(clippy::cast_possible_wrap)]
+            #[expect(clippy::cast_possible_wrap)]
             if UnregisterWait(self.as_raw()) == 0 {
                 let last_os_error = io::Error::last_os_error();
                 assert!(

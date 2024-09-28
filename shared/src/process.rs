@@ -91,8 +91,8 @@ impl Process {
             .collect::<Vec<_>>();
 
         let mut startup_info = STARTUPINFOW {
-            #[allow(clippy::cast_possible_truncation)]
-            cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+            #[expect(clippy::cast_possible_truncation)]
+            cb: size_of::<STARTUPINFOW>() as u32,
             lpReserved: NULL.cast(),
             lpDesktop: NULL.cast(),
             lpTitle: NULL.cast(),
@@ -194,12 +194,12 @@ impl Process {
                 information
             };
 
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             if SetInformationJobObject(
                 job.as_raw(),
                 JobObjectExtendedLimitInformation,
                 std::ptr::addr_of!(information).cast_mut().cast(),
-                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
             ) == 0
             {
                 return Err(io::Error::last_os_error().into());
@@ -297,7 +297,7 @@ impl Process {
                 self.handle.as_raw(),
                 address as *mut c_void,
                 data.cast(),
-                std::mem::size_of::<T>(),
+                size_of::<T>(),
                 NULL.cast(),
             ) == 0
             {
@@ -337,14 +337,14 @@ impl Process {
         Ok(self.read_to_vec(address, 1)?[0])
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[expect(clippy::missing_panics_doc)]
     pub fn read_u16(&self, address: usize) -> Result<u16, io::Error> {
         Ok(u16::from_le_bytes(
             <[u8; 2]>::try_from(self.read_to_vec(address, 2)?).unwrap(),
         ))
     }
 
-    #[allow(clippy::missing_panics_doc)]
+    #[expect(clippy::missing_panics_doc)]
     pub fn read_u32(&self, address: usize) -> Result<u32, io::Error> {
         Ok(u32::from_le_bytes(
             <[u8; 4]>::try_from(self.read_to_vec(address, 4)?).unwrap(),
@@ -403,7 +403,10 @@ impl Process {
                 self.handle.as_raw(),
                 NULL.cast(),
                 0,
-                Some(std::mem::transmute(start_address)),
+                Some(std::mem::transmute::<
+                    usize,
+                    unsafe extern "system" fn(*mut c_void) -> u32,
+                >(start_address)),
                 parameter.unwrap_or(NULL),
                 if suspended { CREATE_SUSPENDED } else { 0 },
                 NULL.cast(),
@@ -499,15 +502,14 @@ impl Process {
             return Err(InvalidModuleHeadersError.into());
         }
 
-        #[allow(clippy::cast_sign_loss)]
+        #[expect(clippy::cast_sign_loss)]
         let pe_header_address = module_address + dos_header.e_lfanew as usize;
         debug!("verify signature of pe header at 0x{pe_header_address:x}");
         if self.read_to_vec(pe_header_address, 4)? != [0x50, 0x45, 0x0, 0x0] {
             return Err(InvalidModuleHeadersError.into());
         }
 
-        let optional_header_address =
-            pe_header_address + 4 + std::mem::size_of::<IMAGE_FILE_HEADER>();
+        let optional_header_address = pe_header_address + 4 + size_of::<IMAGE_FILE_HEADER>();
         debug!("read optional header from 0x{optional_header_address:x} and verify magic",);
         let optional_header_magic = self.read_to_vec(optional_header_address, 2)?;
         let optional_header = match (optional_header_magic[0], optional_header_magic[1]) {
@@ -668,8 +670,8 @@ impl Iterator for ThreadIdIterator {
         // https://devblogs.microsoft.com/oldnewthing/20060223-14/?p=32173
 
         let mut entry = THREADENTRY32 {
-            #[allow(clippy::cast_possible_truncation)]
-            dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+            #[expect(clippy::cast_possible_truncation)]
+            dwSize: size_of::<THREADENTRY32>() as u32,
             cntUsage: 0,
             th32ThreadID: 0,
             th32OwnerProcessID: 0,
@@ -723,7 +725,7 @@ impl ModuleEntry32Iterator {
 
             // retry on ERROR_BAD_LENGTH (see: https://learn.microsoft.com/en-us/windows/win32/api/TlHelp32/nf-tlhelp32-createtoolhelp32snapshot)
             let error = io::Error::last_os_error();
-            #[allow(clippy::cast_sign_loss)]
+            #[expect(clippy::cast_sign_loss)]
             if !error
                 .raw_os_error()
                 .is_some_and(|code| code as u32 == ERROR_BAD_LENGTH)
@@ -744,8 +746,8 @@ impl Iterator for ModuleEntry32Iterator {
 
     fn next(&mut self) -> Option<Self::Item> {
         let mut me32 = MODULEENTRY32 {
-            #[allow(clippy::cast_possible_truncation)]
-            dwSize: std::mem::size_of::<MODULEENTRY32>() as u32,
+            #[expect(clippy::cast_possible_truncation)]
+            dwSize: size_of::<MODULEENTRY32>() as u32,
             th32ModuleID: 0,
             th32ProcessID: 0,
             GlblcntUsage: 0,

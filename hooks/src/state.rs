@@ -29,7 +29,7 @@ pub(crate) struct MSGSend(pub(crate) MSG);
 
 unsafe impl Send for MSGSend {}
 
-#[allow(clippy::struct_excessive_bools)]
+#[expect(clippy::struct_excessive_bools)]
 pub(crate) struct MouseState {
     pub(crate) x: u16,
     pub(crate) y: u16,
@@ -72,11 +72,11 @@ impl State {
     }
 
     pub(crate) fn get_key_state(&self, key_code: u8) -> bool {
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         const VK_SHIFT: u8 = winuser::VK_SHIFT as u8;
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         const VK_CONTROL: u8 = winuser::VK_CONTROL as u8;
-        #[allow(clippy::cast_possible_truncation)]
+        #[expect(clippy::cast_possible_truncation)]
         const VK_MENU: u8 = winuser::VK_MENU as u8;
 
         match key_code {
@@ -144,7 +144,7 @@ pub(crate) fn sleep(ticks: u64) {
     if !in_main_thread() {
         let sleep_trampoline = hooks::get_trampoline!(Sleep, unsafe extern "system" fn(u32));
         unsafe {
-            #[allow(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_possible_truncation)]
             sleep_trampoline((ticks * 1000 / State::TICKS_PER_SECOND) as u32);
         }
         return;
@@ -219,9 +219,9 @@ fn poll_events_for_sleep() {
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
         let event = event_queue.dequeue_blocking();
         match event {
-            #[allow(clippy::cast_possible_truncation)]
-            #[allow(clippy::cast_precision_loss)]
-            #[allow(clippy::cast_sign_loss)]
+            #[expect(clippy::cast_possible_truncation)]
+            #[expect(clippy::cast_precision_loss)]
+            #[expect(clippy::cast_sign_loss)]
             Event::AdvanceTime(duration) => {
                 STATE.lock().unwrap().pending_ticks +=
                     (duration.as_secs_f64() * State::TICKS_PER_SECOND as f64).round() as u64;
@@ -288,7 +288,7 @@ fn poll_events_for_sleep() {
                 )
                 .unwrap();
             },
-            #[allow(unreachable_patterns)] // Event is #[non_exhaustive]
+            #[expect(unreachable_patterns)] // Event is #[non_exhaustive]
             event => unimplemented!("event {event:?}"),
         }
     }
@@ -310,20 +310,20 @@ fn post_message(message_id: u32, w_parameter: usize, l_parameter: isize) {
         1
     }
 
-    #[allow(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_truncation)]
     let time_in_ticks = STATE.lock().unwrap().ticks as u32;
     unsafe {
         EnumThreadWindows(
             MAIN_THREAD_ID.assume_init(),
             Some(callback),
-            &mut MSGSend(MSG {
+            std::ptr::from_mut::<MSGSend>(&mut MSGSend(MSG {
                 hwnd: NULL.cast(),
                 message: message_id,
                 wParam: w_parameter,
                 lParam: l_parameter,
                 time: time_in_ticks,
                 pt: POINT { x: 0, y: 0 },
-            }) as *mut MSGSend as isize,
+            })) as isize,
         );
     }
 }
@@ -331,8 +331,8 @@ fn post_message(message_id: u32, w_parameter: usize, l_parameter: isize) {
 fn post_mouse_message(message_id: u32, w_parameter_high_word: u16) {
     let w_parameter;
     let l_parameter;
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::cast_possible_wrap)]
+    #[expect(clippy::cast_possible_truncation)]
+    #[expect(clippy::cast_possible_wrap)]
     {
         let state = STATE.lock().unwrap();
         w_parameter = (usize::from(w_parameter_high_word) << 16)

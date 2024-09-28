@@ -16,8 +16,8 @@ pub fn new() -> Result<(Writer, Reader), NewError> {
         let mut read_handle = std::ptr::null_mut();
         let mut write_handle = std::ptr::null_mut();
         let security_attributes = SECURITY_ATTRIBUTES {
-            #[allow(clippy::cast_possible_truncation)]
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            #[expect(clippy::cast_possible_truncation)]
+            nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: NULL.cast(),
             bInheritHandle: TRUE,
         };
