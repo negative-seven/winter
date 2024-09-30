@@ -360,7 +360,7 @@ unsafe fn register_class_ex(information: *const WNDCLASSEXA, unicode_strings: bo
 
             let current_process = process::Process::get_current();
             let hook_wrapper_pointer = current_process
-                .allocate_read_execute_memory(hook_wrapper.len())
+                .allocate_memory(hook_wrapper.len(), process::MemoryPermissions::ReadExecute)
                 .unwrap();
             current_process
                 .write(hook_wrapper_pointer, &hook_wrapper)

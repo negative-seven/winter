@@ -33,8 +33,7 @@ use winapi::{
             IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_FILE_MACHINE_AMD64,
             IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_IA64, IMAGE_FILE_MACHINE_UNKNOWN,
             IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, MEM_RELEASE, PAGE_EXECUTE_READ,
-            PAGE_READWRITE,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, MEM_RELEASE,
         },
         wow64apiset::IsWow64Process2,
     },
@@ -244,10 +243,20 @@ impl Process {
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]
-    pub fn allocate_read_write_memory(&self, size: usize) -> Result<usize, AllocateMemoryError> {
-        let pointer =
-            unsafe { VirtualAllocEx(self.handle.as_raw(), NULL, size, MEM_COMMIT, PAGE_READWRITE) }
-                as usize;
+    pub fn allocate_memory(
+        &self,
+        size: usize,
+        permissions: MemoryPermissions,
+    ) -> Result<usize, AllocateMemoryError> {
+        let pointer = unsafe {
+            VirtualAllocEx(
+                self.handle.as_raw(),
+                NULL,
+                size,
+                MEM_COMMIT,
+                permissions as u32,
+            )
+        } as usize;
         if pointer == 0 {
             return Err(io::Error::last_os_error().into());
         }
@@ -263,24 +272,6 @@ impl Process {
             }
         }
         Ok(())
-    }
-
-    #[instrument(ret(level = Level::DEBUG), err)]
-    pub fn allocate_read_execute_memory(&self, size: usize) -> Result<usize, AllocateMemoryError> {
-        let pointer = unsafe {
-            VirtualAllocEx(
-                self.handle.as_raw(),
-                NULL,
-                size,
-                MEM_COMMIT,
-                PAGE_EXECUTE_READ,
-            )
-        } as usize;
-        if pointer == 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-
-        Ok(pointer)
     }
 
     #[instrument(
@@ -560,7 +551,7 @@ impl Process {
             CString::new(library_path).map_err(LibraryPathContainsNulError)?;
 
         debug!("write no-op function");
-        let no_op_function_pointer = self.allocate_read_execute_memory(1)?;
+        let no_op_function_pointer = self.allocate_memory(1, MemoryPermissions::ReadExecute)?;
         self.write(no_op_function_pointer, &[0xc3])?; // opcode c3 is ret in both x86 and x64
 
         debug!("run dummy thread to provoke loading of kernel32.dll");
@@ -569,8 +560,10 @@ impl Process {
             .await?;
 
         debug!("write injected dll path");
-        let injected_dll_path_pointer =
-            self.allocate_read_write_memory(library_path_c_string.to_bytes_with_nul().len())?;
+        let injected_dll_path_pointer = self.allocate_memory(
+            library_path_c_string.to_bytes_with_nul().len(),
+            MemoryPermissions::ReadWrite,
+        )?;
         self.write(
             injected_dll_path_pointer,
             library_path_c_string.as_bytes_with_nul(),
@@ -627,7 +620,7 @@ impl Process {
             }
         };
         let load_dll_function_pointer =
-            self.allocate_read_execute_memory(load_dll_function.len())?;
+            self.allocate_memory(load_dll_function.len(), MemoryPermissions::ReadExecute)?;
         self.write(load_dll_function_pointer, &load_dll_function)?;
 
         debug!("run dll loading thread");
@@ -640,6 +633,16 @@ impl Process {
             error_code => return Err(LoadLibraryThreadError { error_code }.into()),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MemoryPermissions {
+    None = 0x1,
+    Read = 0x2,
+    ReadWrite = 0x4,
+    Execute = 0x10,
+    ReadExecute = 0x20,
+    ReadWriteExecute = 0x40,
 }
 
 pub struct ThreadIdIterator {

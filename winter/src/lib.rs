@@ -67,8 +67,8 @@ impl Conductor {
             serialized_message_sender: unsafe { hooks_sender.leak_to_bytes() },
             serialized_message_receiver: unsafe { hooks_receiver.leak_to_bytes() },
         })?;
-        let initial_message_pointer =
-            subprocess.allocate_read_write_memory(initial_message.len())?;
+        let initial_message_pointer = subprocess
+            .allocate_memory(initial_message.len(), process::MemoryPermissions::ReadWrite)?;
         subprocess.write(initial_message_pointer, &initial_message)?;
         subprocess.create_thread(
             subprocess.get_export_address(hooks_library, "initialize")?,
