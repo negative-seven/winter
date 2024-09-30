@@ -152,7 +152,7 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut Conductor
                     .collect::<Result<Vec<_>, _>>()
                     .unwrap()
                 {
-                    thread.resume().unwrap();
+                    thread.decrement_suspend_count().unwrap();
                 }
             }
             ConductorMessage::AdvanceTime(duration) => {

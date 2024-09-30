@@ -5,7 +5,9 @@ use tracing::{instrument, Level};
 use winapi::{
     shared::minwindef::FALSE,
     um::{
-        processthreadsapi::{GetExitCodeThread, GetThreadId, OpenThread, ResumeThread},
+        processthreadsapi::{
+            GetExitCodeThread, GetThreadId, OpenThread, ResumeThread, SuspendThread,
+        },
         synchapi::WaitForSingleObject,
         winbase::{INFINITE, WAIT_FAILED},
         winnt::THREAD_SUSPEND_RESUME,
@@ -45,7 +47,15 @@ impl Thread {
     }
 
     #[instrument(err)]
-    pub fn resume(&self) -> Result<(), ResumeError> {
+    pub fn increment_suspend_count(&self) -> Result<(), ChangeSuspendCountError> {
+        if unsafe { SuspendThread(self.handle.as_raw()) } == 0xffff_ffff {
+            return Err(io::Error::last_os_error().into());
+        }
+        Ok(())
+    }
+
+    #[instrument(err)]
+    pub fn decrement_suspend_count(&self) -> Result<(), ChangeSuspendCountError> {
         if unsafe { ResumeThread(self.handle.as_raw()) } == 0xffff_ffff {
             return Err(io::Error::last_os_error().into());
         }
@@ -78,8 +88,8 @@ pub struct FromIdError(#[from] io::Error);
 pub struct GetIdError(#[from] io::Error);
 
 #[derive(Debug, Error)]
-#[error("failed to resume thread")]
-pub struct ResumeError(#[from] io::Error);
+#[error("failed to change thread's suspend count")]
+pub struct ChangeSuspendCountError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 #[error("failed to join thread")]
