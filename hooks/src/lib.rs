@@ -117,10 +117,13 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut Conductor
                 Some(location) => format!(" at {location}"),
                 None => String::new(),
             },
-            match panic_info.payload().downcast_ref::<&str>() {
-                Some(payload) => format!(": {payload}"),
-                None => String::new(),
-            },
+            if let Some(payload) = panic_info.payload().downcast_ref::<&str>() {
+                format!(": {payload}")
+            } else if let Some(payload) = panic_info.payload().downcast_ref::<String>() {
+                format!(": {payload}")
+            } else {
+                String::new()
+            }
         );
     }));
 
