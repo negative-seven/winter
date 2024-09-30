@@ -34,11 +34,11 @@ impl Thread {
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]
-    pub fn get_id(&self) -> Result<u32, io::Error> {
+    pub fn get_id(&self) -> Result<u32, GetIdError> {
         let id = unsafe { GetThreadId(self.handle.as_raw()) };
 
         if id == 0 {
-            return Err(io::Error::last_os_error());
+            return Err(io::Error::last_os_error().into());
         }
 
         Ok(id)
@@ -72,6 +72,10 @@ impl Thread {
 #[derive(Debug, Error)]
 #[error("failed to open thread handle from id")]
 pub struct FromIdError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to get thread id")]
+pub struct GetIdError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 #[error("failed to resume thread")]

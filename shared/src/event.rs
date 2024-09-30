@@ -68,7 +68,7 @@ impl ManualResetEvent {
         }
     }
 
-    pub async fn wait(&self) -> Result<(), GetError> {
+    pub async fn wait(&self) -> Result<(), WaitError> {
         self.handle.wait().await?;
         Ok(())
     }
@@ -102,9 +102,12 @@ pub struct CloneError(#[from] handle::CloneError);
 
 #[derive(Debug, Error)]
 #[error("failed to get event state")]
-pub enum GetError {
+pub struct GetError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to wait for event")]
+pub enum WaitError {
     HandleWait(#[from] handle::WaitError),
-    Os(#[from] io::Error),
 }
 
 #[derive(Debug, Error)]

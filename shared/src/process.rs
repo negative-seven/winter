@@ -244,29 +244,29 @@ impl Process {
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]
-    pub fn allocate_read_write_memory(&self, size: usize) -> Result<usize, io::Error> {
+    pub fn allocate_read_write_memory(&self, size: usize) -> Result<usize, AllocateMemoryError> {
         let pointer =
             unsafe { VirtualAllocEx(self.handle.as_raw(), NULL, size, MEM_COMMIT, PAGE_READWRITE) }
                 as usize;
         if pointer == 0 {
-            return Err(io::Error::last_os_error());
+            return Err(io::Error::last_os_error().into());
         }
 
         Ok(pointer)
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]
-    pub fn free_memory(&self, address: usize) -> Result<(), io::Error> {
+    pub fn free_memory(&self, address: usize) -> Result<(), FreeMemoryError> {
         unsafe {
             if VirtualFreeEx(self.handle.as_raw(), address as *mut c_void, 0, MEM_RELEASE) == 0 {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
         }
         Ok(())
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]
-    pub fn allocate_read_execute_memory(&self, size: usize) -> Result<usize, io::Error> {
+    pub fn allocate_read_execute_memory(&self, size: usize) -> Result<usize, AllocateMemoryError> {
         let pointer = unsafe {
             VirtualAllocEx(
                 self.handle.as_raw(),
@@ -277,7 +277,7 @@ impl Process {
             )
         } as usize;
         if pointer == 0 {
-            return Err(io::Error::last_os_error());
+            return Err(io::Error::last_os_error().into());
         }
 
         Ok(pointer)
@@ -288,7 +288,7 @@ impl Process {
         skip(address),
         fields(address = %format!("0x{:x}", address))
     )]
-    pub unsafe fn read<T: Copy>(&self, address: usize) -> Result<T, io::Error> {
+    pub unsafe fn read<T: Copy>(&self, address: usize) -> Result<T, ReadMemoryError> {
         use std::alloc::{alloc, dealloc, Layout};
 
         unsafe {
@@ -302,7 +302,7 @@ impl Process {
             ) == 0
             {
                 dealloc(data, Layout::array::<T>(1).unwrap());
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
             let result = *data.cast();
             dealloc(data, Layout::array::<T>(1).unwrap());
@@ -316,7 +316,7 @@ impl Process {
         skip(address),
         fields(address = %format!("0x{:x}", address))
     )]
-    pub fn read_to_vec(&self, address: usize, size: usize) -> Result<Vec<u8>, io::Error> {
+    pub fn read_to_vec(&self, address: usize, size: usize) -> Result<Vec<u8>, ReadMemoryError> {
         let mut data = vec![0; size];
         unsafe {
             if ReadProcessMemory(
@@ -327,31 +327,31 @@ impl Process {
                 NULL.cast(),
             ) == 0
             {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
         }
         Ok(data)
     }
 
-    pub fn read_u8(&self, address: usize) -> Result<u8, io::Error> {
+    pub fn read_u8(&self, address: usize) -> Result<u8, ReadMemoryError> {
         Ok(self.read_to_vec(address, 1)?[0])
     }
 
     #[expect(clippy::missing_panics_doc)]
-    pub fn read_u16(&self, address: usize) -> Result<u16, io::Error> {
+    pub fn read_u16(&self, address: usize) -> Result<u16, ReadMemoryError> {
         Ok(u16::from_le_bytes(
             <[u8; 2]>::try_from(self.read_to_vec(address, 2)?).unwrap(),
         ))
     }
 
     #[expect(clippy::missing_panics_doc)]
-    pub fn read_u32(&self, address: usize) -> Result<u32, io::Error> {
+    pub fn read_u32(&self, address: usize) -> Result<u32, ReadMemoryError> {
         Ok(u32::from_le_bytes(
             <[u8; 4]>::try_from(self.read_to_vec(address, 4)?).unwrap(),
         ))
     }
 
-    pub fn read_nul_terminated_string(&self, address: usize) -> Result<String, io::Error> {
+    pub fn read_nul_terminated_string(&self, address: usize) -> Result<String, ReadMemoryError> {
         let mut string = String::new();
         for index in 0.. {
             let next_byte = self.read_u8(address + index)?;
@@ -369,7 +369,7 @@ impl Process {
         skip(address, data),
         fields(address = %format!("0x{:x}", address), data_len = data.len())
     )]
-    pub fn write(&self, address: usize, data: &[u8]) -> Result<(), io::Error> {
+    pub fn write(&self, address: usize, data: &[u8]) -> Result<(), WriteMemoryError> {
         unsafe {
             if WriteProcessMemory(
                 self.handle.as_raw(),
@@ -379,7 +379,7 @@ impl Process {
                 NULL.cast(),
             ) == 0
             {
-                return Err(io::Error::last_os_error());
+                return Err(io::Error::last_os_error().into());
             }
         }
 
@@ -397,7 +397,7 @@ impl Process {
         start_address: usize,
         suspended: bool,
         parameter: Option<*mut c_void>,
-    ) -> Result<Thread, io::Error> {
+    ) -> Result<Thread, CreateThreadError> {
         let thread_handle = unsafe {
             CreateRemoteThread(
                 self.handle.as_raw(),
@@ -414,7 +414,7 @@ impl Process {
         };
 
         if thread_handle == NULL {
-            return Err(io::Error::last_os_error());
+            return Err(io::Error::last_os_error().into());
         }
 
         Ok(unsafe { Thread::from_handle(Handle::from_raw(thread_handle)) })
@@ -786,8 +786,8 @@ pub enum CreateError {
 #[derive(Debug, Error)]
 #[error("failed to determine whether process is 64-bit")]
 pub enum CheckIs64BitError {
-    Os(#[from] io::Error),
     UnknownMachine(#[from] UnknownMachineError),
+    Os(#[from] io::Error),
 }
 
 #[derive(Debug, Error)]
@@ -796,9 +796,7 @@ pub struct UnknownMachineError(u16);
 
 #[derive(Debug, Error)]
 #[error("failed to set process to be killed on current process exit")]
-pub enum KillOnCurrentProcessExitError {
-    Os(#[from] io::Error),
-}
+pub struct KillOnCurrentProcessExitError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 #[error("error occurred while joining process")]
@@ -816,12 +814,31 @@ pub enum IterThreadIdsError {
 }
 
 #[derive(Debug, Error)]
+#[error("failed to allocate memory")]
+pub struct AllocateMemoryError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to free memory")]
+pub struct FreeMemoryError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to read from memory")]
+pub struct ReadMemoryError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to write to memory")]
+pub struct WriteMemoryError(#[from] io::Error);
+
+#[derive(Debug, Error)]
+#[error("failed to create thread")]
+pub struct CreateThreadError(#[from] io::Error);
+
+#[derive(Debug, Error)]
 #[error("failed to get module address")]
 pub enum GetModuleAddressError {
     GetId(#[from] GetIdError),
     NewModuleEntry32Iterator(#[from] NewModuleEntry32IteratorError),
     ModuleNotFound(#[from] ModuleNotFoundError),
-    Os(#[from] io::Error),
 }
 
 #[derive(Debug, Error)]
@@ -832,6 +849,7 @@ pub struct ModuleNotFoundError;
 #[error("failed to get export address")]
 pub enum GetExportAddressError {
     GetModuleAddress(#[from] GetModuleAddressError),
+    ReadMemory(#[from] ReadMemoryError),
     InvalidModuleHeaders(#[from] InvalidModuleHeadersError),
     ExportNotFound(#[from] ExportNotFoundError),
     Os(#[from] io::Error),
@@ -850,10 +868,13 @@ pub struct ExportNotFoundError;
 pub enum InjectDllError {
     LibraryPathContainsNul(#[from] LibraryPathContainsNulError),
     GetExportAddress(#[from] GetExportAddressError),
+    AllocateMemory(#[from] AllocateMemoryError),
+    ReadMemory(#[from] ReadMemoryError),
+    WriteMemory(#[from] WriteMemoryError),
+    CreateThread(#[from] CreateThreadError),
     JoinThread(#[from] crate::thread::JoinError),
     LoadLibraryThread(#[from] LoadLibraryThreadError),
     CheckIs64Bit(#[from] CheckIs64BitError),
-    Os(#[from] io::Error),
 }
 
 #[derive(Debug, Error)]
@@ -864,7 +885,7 @@ pub struct LoadLibraryThreadError {
 
 #[derive(Debug, Error)]
 #[error("library path contains nul")]
-pub struct LibraryPathContainsNulError(#[source] NulError);
+pub struct LibraryPathContainsNulError(#[from] NulError);
 
 #[derive(Debug, Error)]
 #[error("failed to create thread id iterator")]

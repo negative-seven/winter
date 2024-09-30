@@ -67,19 +67,14 @@ impl Conductor {
             serialized_message_sender: unsafe { hooks_sender.leak_to_bytes() },
             serialized_message_receiver: unsafe { hooks_receiver.leak_to_bytes() },
         })?;
-        let initial_message_pointer = subprocess
-            .allocate_read_write_memory(initial_message.len())
-            .map_err(NewError::ProcessAllocate)?;
-        subprocess
-            .write(initial_message_pointer, &initial_message)
-            .map_err(NewError::ProcessWrite)?;
-        subprocess
-            .create_thread(
-                subprocess.get_export_address(hooks_library, "initialize")?,
-                false,
-                Some(initial_message_pointer as _),
-            )
-            .map_err(NewError::ThreadCreate)?;
+        let initial_message_pointer =
+            subprocess.allocate_read_write_memory(initial_message.len())?;
+        subprocess.write(initial_message_pointer, &initial_message)?;
+        subprocess.create_thread(
+            subprocess.get_export_address(hooks_library, "initialize")?,
+            false,
+            Some(initial_message_pointer as _),
+        )?;
 
         match conductor_receiver.receive().await? {
             HooksMessage::HooksInitialized => (),
@@ -228,11 +223,11 @@ pub enum NewError {
     CheckIs64Bit(#[from] CheckIs64BitError),
     KillOnCurrentProcessExit(#[from] process::KillOnCurrentProcessExitError),
     InjectDll(#[from] process::InjectDllError),
-    ProcessAllocate(#[source] io::Error),
-    ProcessWrite(#[source] io::Error),
+    ProcessAllocateMemory(#[from] process::AllocateMemoryError),
+    ProcessWriteMemory(#[from] process::WriteMemoryError),
     GetExportAddress(#[from] process::GetExportAddressError),
     NewEvent(#[from] event::NewError),
-    ThreadCreate(#[source] io::Error),
+    ProcessCreateTHread(#[from] process::CreateThreadError),
     MessageReceive(#[from] communication::ReceiveError),
     UnexpectedMessage(#[from] UnexpectedMessageError),
     Bincode(#[from] bincode::Error),
@@ -279,7 +274,7 @@ pub enum AdvanceTimeError {
 #[derive(Debug, Error)]
 #[error("error occurred while waiting for the subprocess to become inactive")]
 pub enum WaitUntilInactiveError {
-    EventGet(#[from] event::GetError),
+    EventWait(#[from] event::WaitError),
     EventReset(#[from] event::ResetError),
     ProcessJoin(#[from] process::JoinError),
     MessageSend(#[from] communication::SendError),

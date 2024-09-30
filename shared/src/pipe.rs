@@ -28,7 +28,7 @@ pub fn new() -> Result<(Writer, Reader), NewError> {
             0,
         ) == 0
         {
-            return Err(NewError(std::io::Error::last_os_error()));
+            return Err(std::io::Error::last_os_error().into());
         }
 
         Ok((
@@ -164,4 +164,4 @@ impl Read for Reader {
 
 #[derive(Debug, Error)]
 #[error("failed to create pipe")]
-pub struct NewError(#[source] std::io::Error);
+pub struct NewError(#[from] std::io::Error);

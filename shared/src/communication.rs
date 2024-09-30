@@ -224,7 +224,7 @@ pub enum LogLevel {
 #[derive(Debug, Error)]
 #[error("failed to send message")]
 pub enum SendError {
-    EventGet(#[from] event::GetError),
+    EventWait(#[from] event::WaitError),
     Bincode(#[from] bincode::Error),
     EventSet(#[from] event::SetError),
     EventReset(#[from] event::ResetError),
@@ -236,6 +236,7 @@ pub enum SendError {
 pub enum ReceiveError {
     Bincode(#[from] bincode::Error),
     EventGet(#[from] event::GetError),
+    EventWait(#[from] event::WaitError),
     EventSet(#[from] event::SetError),
     EventReset(#[from] event::ResetError),
 }
