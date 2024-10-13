@@ -254,7 +254,7 @@ impl Process {
                 NULL,
                 size,
                 MEM_COMMIT,
-                permissions as u32,
+                permissions.to_winapi_constant(),
             )
         } as usize;
         if pointer == 0 {
@@ -551,7 +551,13 @@ impl Process {
             CString::new(library_path).map_err(LibraryPathContainsNulError)?;
 
         debug!("write no-op function");
-        let no_op_function_pointer = self.allocate_memory(1, MemoryPermissions::ReadExecute)?;
+        let no_op_function_pointer = self.allocate_memory(
+            1,
+            MemoryPermissions {
+                rwe: MemoryPermissionsRwe::ReadExecute,
+                is_guard: false,
+            },
+        )?;
         self.write(no_op_function_pointer, &[0xc3])?; // opcode c3 is ret in both x86 and x64
 
         debug!("run dummy thread to provoke loading of kernel32.dll");
@@ -562,7 +568,10 @@ impl Process {
         debug!("write injected dll path");
         let injected_dll_path_pointer = self.allocate_memory(
             library_path_c_string.to_bytes_with_nul().len(),
-            MemoryPermissions::ReadWrite,
+            MemoryPermissions {
+                rwe: MemoryPermissionsRwe::ReadWrite,
+                is_guard: false,
+            },
         )?;
         self.write(
             injected_dll_path_pointer,
@@ -619,8 +628,13 @@ impl Process {
                 function
             }
         };
-        let load_dll_function_pointer =
-            self.allocate_memory(load_dll_function.len(), MemoryPermissions::ReadExecute)?;
+        let load_dll_function_pointer = self.allocate_memory(
+            load_dll_function.len(),
+            MemoryPermissions {
+                rwe: MemoryPermissionsRwe::ReadExecute,
+                is_guard: false,
+            },
+        )?;
         self.write(load_dll_function_pointer, &load_dll_function)?;
 
         debug!("run dll loading thread");
@@ -635,14 +649,59 @@ impl Process {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum MemoryPermissions {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MemoryPermissions {
+    pub rwe: MemoryPermissionsRwe,
+    pub is_guard: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MemoryPermissionsRwe {
+    Unknown = 0x0,
     None = 0x1,
     Read = 0x2,
     ReadWrite = 0x4,
+    ReadWriteCow = 0x8,
     Execute = 0x10,
     ReadExecute = 0x20,
     ReadWriteExecute = 0x40,
+}
+
+impl MemoryPermissions {
+    #[must_use]
+    pub fn from_winapi_constant(constant: u32) -> Self {
+        let guard = constant & 0x100 != 0;
+        let rwe = match constant & 0xff {
+            0x0 => MemoryPermissionsRwe::Unknown,
+            0x1 => MemoryPermissionsRwe::None,
+            0x2 => MemoryPermissionsRwe::Read,
+            0x4 => MemoryPermissionsRwe::ReadWrite,
+            0x8 => MemoryPermissionsRwe::ReadWriteCow,
+            0x10 => MemoryPermissionsRwe::Execute,
+            0x20 => MemoryPermissionsRwe::ReadExecute,
+            0x40 => MemoryPermissionsRwe::ReadWriteExecute,
+            _ => unimplemented!("memory permissions constant: {constant:#x}"),
+        };
+        Self {
+            rwe,
+            is_guard: guard,
+        }
+    }
+
+    #[must_use]
+    pub fn to_winapi_constant(&self) -> u32 {
+        let rwe = match self.rwe {
+            MemoryPermissionsRwe::Unknown => 0x0,
+            MemoryPermissionsRwe::None => 0x1,
+            MemoryPermissionsRwe::Read => 0x2,
+            MemoryPermissionsRwe::ReadWrite => 0x4,
+            MemoryPermissionsRwe::ReadWriteCow => 0x8,
+            MemoryPermissionsRwe::Execute => 0x10,
+            MemoryPermissionsRwe::ReadExecute => 0x20,
+            MemoryPermissionsRwe::ReadWriteExecute => 0x40,
+        };
+        (if self.is_guard { 0x100 } else { 0 }) | rwe
+    }
 }
 
 pub struct ThreadIdIterator {
