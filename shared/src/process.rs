@@ -6,6 +6,7 @@ use crate::{
 use std::{
     ffi::{CStr, CString, NulError, OsStr},
     io,
+    mem::MaybeUninit,
     os::windows::ffi::OsStrExt,
     path::Path,
 };
@@ -13,14 +14,21 @@ use thiserror::Error;
 use tracing::{debug, instrument, Level};
 use winapi::{
     ctypes::c_void,
-    shared::{minwindef::TRUE, ntdef::NULL, winerror::ERROR_BAD_LENGTH},
+    shared::{
+        minwindef::{FALSE, TRUE},
+        ntdef::NULL,
+        winerror::ERROR_BAD_LENGTH,
+    },
     um::{
         handleapi::INVALID_HANDLE_VALUE,
         jobapi2::{AssignProcessToJobObject, SetInformationJobObject},
-        memoryapi::{ReadProcessMemory, VirtualAllocEx, VirtualFreeEx, WriteProcessMemory},
+        memoryapi::{
+            ReadProcessMemory, VirtualAllocEx, VirtualFreeEx, VirtualProtectEx, VirtualQueryEx,
+            WriteProcessMemory,
+        },
         processthreadsapi::{
             CreateProcessW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess,
-            GetProcessId, PROCESS_INFORMATION, STARTUPINFOW,
+            GetProcessId, OpenProcess, PROCESS_INFORMATION, STARTUPINFOW,
         },
         tlhelp32::{
             CreateToolhelp32Snapshot, Module32First, Module32Next, Thread32First, Thread32Next,
@@ -33,7 +41,8 @@ use winapi::{
             IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_FILE_MACHINE_AMD64,
             IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_IA64, IMAGE_FILE_MACHINE_UNKNOWN,
             IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, MEM_RELEASE,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, MEM_FREE, MEM_RELEASE, MEM_RESERVE,
+            PROCESS_ALL_ACCESS,
         },
         wow64apiset::IsWow64Process2,
     },
@@ -50,6 +59,16 @@ impl Process {
         Self {
             handle: unsafe { Handle::from_raw(GetCurrentProcess()) },
         }
+    }
+
+    pub fn from_id(id: u32) -> Result<Self, io::Error> {
+        let handle = unsafe { OpenProcess(PROCESS_ALL_ACCESS, FALSE, id) };
+        if handle.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self {
+            handle: unsafe { Handle::from_raw(handle) },
+        })
     }
 
     #[instrument(
@@ -253,7 +272,29 @@ impl Process {
                 self.handle.as_raw(),
                 NULL,
                 size,
-                MEM_COMMIT,
+                MEM_COMMIT | MEM_RESERVE,
+                permissions.to_winapi_constant(),
+            )
+        } as usize;
+        if pointer == 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+
+        Ok(pointer)
+    }
+
+    pub fn allocate_memory_at(
+        &self,
+        address: usize,
+        size: usize,
+        permissions: MemoryPermissions,
+    ) -> Result<usize, AllocateMemoryError> {
+        let pointer = unsafe {
+            VirtualAllocEx(
+                self.handle.as_raw(),
+                address as *mut c_void,
+                size,
+                MEM_COMMIT | MEM_RESERVE,
                 permissions.to_winapi_constant(),
             )
         } as usize;
@@ -272,6 +313,28 @@ impl Process {
             }
         }
         Ok(())
+    }
+
+    pub fn set_memory_permissions(
+        &self,
+        address: usize,
+        size: usize,
+        permissions: MemoryPermissions,
+    ) -> Result<MemoryPermissions, SetMemoryPermissionsError> {
+        let mut previous_constant = 0;
+        unsafe {
+            if VirtualProtectEx(
+                self.handle.as_raw(),
+                address as *mut c_void,
+                size,
+                permissions.to_winapi_constant(),
+                std::ptr::addr_of_mut!(previous_constant),
+            ) == 0
+            {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
+        Ok(MemoryPermissions::from_winapi_constant(previous_constant))
     }
 
     #[instrument(
@@ -546,6 +609,36 @@ impl Process {
     }
 
     #[instrument]
+    pub fn get_memory_region(&self, address: usize) -> Result<MemoryRegion, GetMemoryRegionError> {
+        unsafe {
+            let mut winapi_region = MaybeUninit::zeroed().assume_init();
+            if VirtualQueryEx(
+                self.handle.as_raw(),
+                address as *const c_void,
+                &mut winapi_region,
+                size_of_val(&winapi_region),
+            ) == 0
+            {
+                return Err(io::Error::last_os_error().into());
+            }
+            Ok(if winapi_region.State == MEM_FREE {
+                MemoryRegion::Free(FreeMemoryRegion {
+                    address: winapi_region.BaseAddress as usize,
+                    size: winapi_region.RegionSize,
+                })
+            } else {
+                MemoryRegion::Reserved(ReservedMemoryRegion {
+                    address: winapi_region.BaseAddress as usize,
+                    size: winapi_region.RegionSize,
+                    is_committed: winapi_region.State == MEM_COMMIT,
+                    allocation_address: winapi_region.AllocationBase as usize,
+                    permissions: MemoryPermissions::from_winapi_constant(winapi_region.Protect),
+                })
+            })
+        }
+    }
+
+    #[instrument]
     pub async fn inject_dll(&self, library_path: &str) -> Result<(), InjectDllError> {
         let library_path_c_string =
             CString::new(library_path).map_err(LibraryPathContainsNulError)?;
@@ -646,6 +739,81 @@ impl Process {
             0 => Ok(()),
             error_code => return Err(LoadLibraryThreadError { error_code }.into()),
         }
+    }
+}
+
+pub enum MemoryRegion {
+    Free(FreeMemoryRegion),
+    Reserved(ReservedMemoryRegion),
+}
+
+impl MemoryRegion {
+    #[must_use]
+    pub fn address(&self) -> usize {
+        match self {
+            MemoryRegion::Free(free_memory_region) => free_memory_region.address,
+            MemoryRegion::Reserved(reserved_memory_region) => reserved_memory_region.address,
+        }
+    }
+
+    #[must_use]
+    pub fn size(&self) -> usize {
+        match self {
+            MemoryRegion::Free(free_memory_region) => free_memory_region.size,
+            MemoryRegion::Reserved(reserved_memory_region) => reserved_memory_region.size,
+        }
+    }
+}
+
+pub struct FreeMemoryRegion {
+    address: usize,
+    size: usize,
+}
+
+impl FreeMemoryRegion {
+    #[must_use]
+    pub fn address(&self) -> usize {
+        self.address
+    }
+
+    #[must_use]
+    pub fn size(&self) -> usize {
+        self.size
+    }
+}
+
+pub struct ReservedMemoryRegion {
+    address: usize,
+    size: usize,
+    is_committed: bool,
+    allocation_address: usize,
+    permissions: MemoryPermissions,
+}
+
+impl ReservedMemoryRegion {
+    #[must_use]
+    pub fn address(&self) -> usize {
+        self.address
+    }
+
+    #[must_use]
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    #[must_use]
+    pub fn is_committed(&self) -> bool {
+        self.is_committed
+    }
+
+    #[must_use]
+    pub fn allocation_address(&self) -> usize {
+        self.allocation_address
+    }
+
+    #[must_use]
+    pub fn permissions(&self) -> MemoryPermissions {
+        self.permissions
     }
 }
 
@@ -884,6 +1052,10 @@ pub struct AllocateMemoryError(#[from] io::Error);
 pub struct FreeMemoryError(#[from] io::Error);
 
 #[derive(Debug, Error)]
+#[error("failed to set memory permissions")]
+pub struct SetMemoryPermissionsError(#[from] io::Error);
+
+#[derive(Debug, Error)]
 #[error("failed to read from memory")]
 pub struct ReadMemoryError(#[from] io::Error);
 
@@ -924,6 +1096,10 @@ pub struct InvalidModuleHeadersError;
 #[derive(Debug, Error)]
 #[error("export not found in module")]
 pub struct ExportNotFoundError;
+
+#[derive(Debug, Error)]
+#[error("failed to get memory region metadata")]
+pub struct GetMemoryRegionError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 #[error("failed to inject dll")]

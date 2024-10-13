@@ -135,7 +135,10 @@ impl<'a> Instance<'a> {
         for event in &self.events {
             match *event {
                 Event::AdvanceTime(duration) => {
-                    assert!(conductor.wait_until_inactive().await? == winter::InactiveState::Idle);
+                    assert_eq!(
+                        conductor.wait_until_inactive().await?,
+                        winter::InactiveState::Idle
+                    );
                     stdout_by_instant.push(std::mem::take(&mut *stdout.lock().unwrap()));
                     conductor.advance_time(duration).await?;
                 }
@@ -147,6 +150,12 @@ impl<'a> Instance<'a> {
                 }
                 Event::SetMouseButtonState { button, state } => {
                     conductor.set_mouse_button_state(button, state).await?;
+                }
+                Event::SaveState => {
+                    conductor.save_state().await?;
+                }
+                Event::LoadState => {
+                    conductor.load_state().await?;
                 }
             }
         }
@@ -285,4 +294,6 @@ pub enum Event {
     SetKeyState { id: u8, state: bool },
     SetMousePosition { x: u16, y: u16 },
     SetMouseButtonState { button: MouseButton, state: bool },
+    SaveState,
+    LoadState,
 }

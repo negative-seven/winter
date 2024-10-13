@@ -1,3 +1,6 @@
+mod saved_state;
+
+use saved_state::SavedState;
 pub use shared::communication::MouseButton;
 
 use anyhow::Result;
@@ -6,6 +9,7 @@ use shared::{
     event::{self, ManualResetEvent},
     pipe,
     process::{self, CheckIs64BitError},
+    thread,
 };
 use std::{
     ffi::OsStr,
@@ -24,6 +28,7 @@ pub struct Conductor {
     message_sender: communication::Sender<ConductorMessage>,
     idle: ManualResetEvent,
     receive_messages_task: Option<tokio::task::JoinHandle<()>>,
+    saved_state: Option<SavedState>,
 }
 
 impl Conductor {
@@ -51,6 +56,12 @@ impl Conductor {
             None,
         )?;
         subprocess.kill_on_current_process_exit()?;
+        let main_thread = thread::Thread::from_id(
+            subprocess
+                .iter_thread_ids()?
+                .next()
+                .expect("no threads in subprocess"),
+        )?;
 
         let hooks_library = if subprocess.is_64_bit()? {
             "hooks64.dll"
@@ -60,10 +71,7 @@ impl Conductor {
         subprocess.inject_dll(hooks_library).await?;
 
         let initial_message = bincode::serialize(&ConductorInitialMessage {
-            main_thread_id: subprocess
-                .iter_thread_ids()?
-                .next()
-                .expect("no threads in subprocess"),
+            main_thread_id: main_thread.get_id()?,
             serialized_message_sender: unsafe { hooks_sender.leak_to_bytes() },
             serialized_message_receiver: unsafe { hooks_receiver.leak_to_bytes() },
         })?;
@@ -118,6 +126,7 @@ impl Conductor {
             message_sender: conductor_sender,
             idle,
             receive_messages_task: Some(receive_messages_task),
+            saved_state: None,
         })
     }
 
@@ -159,6 +168,22 @@ impl Conductor {
         self.message_sender
             .send(&ConductorMessage::AdvanceTime(time))
             .await?;
+        Ok(())
+    }
+
+    pub async fn save_state(&mut self) -> Result<(), SaveStateError> {
+        self.wait_until_inactive().await?;
+        self.saved_state = Some(SavedState::new(&self.process)?);
+        Ok(())
+    }
+
+    pub async fn load_state(&mut self) -> Result<(), LoadStateError> {
+        self.wait_until_inactive().await?;
+        if let Some(state) = &self.saved_state {
+            state.load(&self.process)?;
+        } else {
+            panic!("no damn state");
+        }
         Ok(())
     }
 
@@ -225,6 +250,8 @@ pub enum NewError {
     NewSenderAndReceiver(#[from] communication::NewSenderAndReceiverError),
     MessageSenderClone(#[from] communication::SenderCloneError),
     ProcessCreate(#[from] process::CreateError),
+    ThreadFromId(#[from] thread::FromIdError),
+    ThreadGetId(#[from] thread::GetIdError),
     CheckIs64Bit(#[from] CheckIs64BitError),
     KillOnCurrentProcessExit(#[from] process::KillOnCurrentProcessExitError),
     InjectDll(#[from] process::InjectDllError),
@@ -274,6 +301,21 @@ pub enum SetMouseButtonStateError {
 #[error("error occurred while advancing time")]
 pub enum AdvanceTimeError {
     MessageSend(#[from] communication::SendError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while saving state")]
+pub enum SaveStateError {
+    WaitUntilInactive(#[from] WaitUntilInactiveError),
+    ThreadFromId(#[from] thread::FromIdError),
+    NewSavedState(#[from] saved_state::NewError),
+}
+
+#[derive(Debug, Error)]
+#[error("error occurred while loading state")]
+pub enum LoadStateError {
+    WaitUntilInactive(#[from] WaitUntilInactiveError),
+    SavedStateLoad(#[from] saved_state::LoadError),
 }
 
 #[derive(Debug, Error)]

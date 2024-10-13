@@ -302,6 +302,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -570,7 +579,7 @@ dependencies = [
 name = "test_utilities_macros"
 version = "0.0.0"
 dependencies = [
- "itertools",
+ "itertools 0.12.1",
  "proc-macro2",
  "quote",
  "syn",
@@ -803,6 +812,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "clap",
+ "itertools 0.13.0",
  "shared",
  "test_utilities",
  "test_utilities_macros",

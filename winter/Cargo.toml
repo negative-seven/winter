@@ -20,6 +20,7 @@ tokio = { version = "1.37.0", features = [
 tracing = "0.1.39"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 shared = { path = "../shared" }
+itertools = "0.13.0"
 
 [dev-dependencies]
 test_utilities = { path = "tests/utilities" }

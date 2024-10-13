@@ -17,6 +17,7 @@ use winapi::{
         winerror::WAIT_TIMEOUT,
     },
     um::{
+        handleapi::CloseHandle,
         minwinbase::{REASON_CONTEXT, SECURITY_ATTRIBUTES},
         profileapi::{QueryPerformanceCounter, QueryPerformanceFrequency},
         synchapi::{
@@ -90,6 +91,12 @@ macro_rules! hook {
 }
 
 const HOOKS: &[(&str, &str, *const c_void)] = &[
+    hook!(
+        "kernel32.dll",
+        CloseHandle,
+        close_handle,
+        unsafe extern "system" fn(*mut c_void) -> i32,
+    ),
     hook!(
         "user32.dll",
         GetKeyboardState,
@@ -280,6 +287,12 @@ pub(crate) fn initialize() {
         }
         let _unused_result = hook_function(module_name, function_name, *hook);
     }
+}
+
+unsafe extern "system" fn close_handle(_handle: *mut c_void) -> i32 {
+    // TODO: temporary solution; leak all handles to ensure that they still exist
+    // after loading a state
+    1
 }
 
 unsafe extern "system" fn get_keyboard_state(key_states: *mut u8) -> i32 {
