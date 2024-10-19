@@ -1,5 +1,6 @@
-use super::common::{get_trampoline, hook};
+use super::common::get_trampoline;
 use crate::state::{self, State, STATE};
+use hooks_macros::{hook, hooks};
 use ntapi::ntpsapi::{NtSetInformationThread, ThreadHideFromDebugger, THREADINFOCLASS};
 use std::sync::Arc;
 use winapi::{
@@ -13,40 +14,22 @@ use winapi::{
     },
 };
 
-pub(crate) const HOOKS: &[(&str, &str, *const c_void)] = &[
-    hook!(
-        "kernel32.dll",
-        CloseHandle,
-        close_handle,
-        unsafe extern "system" fn(*mut c_void) -> i32,
-    ),
-    hook!(
-        "kernel32.dll",
-        WaitForSingleObject,
-        wait_for_single_object,
-        unsafe extern "system" fn(*mut c_void, u32) -> u32,
-    ),
-    hook!(
-        "ws2_32.dll",
-        socket,
-        socket_,
-        unsafe extern "system" fn(i32, i32, i32) -> usize,
-    ),
-    hook!(
-        "ntdll.dll",
-        NtSetInformationThread,
-        nt_set_information_thread,
-        unsafe extern "system" fn(HANDLE, THREADINFOCLASS, *mut c_void, u32) -> i32
-    ),
+pub(crate) const HOOKS: &[(&str, &str, *const c_void)] = &hooks![
+    CloseHandle,
+    WaitForSingleObject,
+    socket,
+    NtSetInformationThread
 ];
 
-unsafe extern "system" fn close_handle(_handle: *mut c_void) -> i32 {
+#[hook("kernel32.dll")]
+unsafe extern "system" fn CloseHandle(_handle: *mut c_void) -> i32 {
     // TODO: temporary solution; leak all handles to ensure that they still exist
     // after loading a state
     1
 }
 
-unsafe extern "system" fn wait_for_single_object(
+#[hook("kernel32.dll")]
+unsafe extern "system" fn WaitForSingleObject(
     object: *mut c_void,
     timeout_in_milliseconds: u32,
 ) -> u32 {
@@ -89,11 +72,13 @@ unsafe extern "system" fn wait_for_single_object(
     }
 }
 
-unsafe extern "system" fn socket_(_address_family: i32, _type: i32, _protocol: i32) -> usize {
+#[hook("ws2_32.dll")]
+unsafe extern "system" fn socket(_address_family: i32, _type: i32, _protocol: i32) -> usize {
     INVALID_SOCKET
 }
 
-unsafe extern "system" fn nt_set_information_thread(
+#[hook("ntdll.dll")]
+unsafe extern "system" fn NtSetInformationThread(
     thread: HANDLE,
     information_class: THREADINFOCLASS,
     information: *mut c_void,

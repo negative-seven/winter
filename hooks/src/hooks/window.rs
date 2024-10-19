@@ -1,5 +1,6 @@
-use super::common::{get_trampoline, hook};
+use super::common::get_trampoline;
 use crate::state::{self, STATE};
+use hooks_macros::{hook, hooks};
 use shared::process;
 use winapi::{
     ctypes::c_void,
@@ -13,50 +14,22 @@ use winapi::{
     },
 };
 
-pub(crate) const HOOKS: &[(&str, &str, *const c_void)] = &[
-    hook!(
-        "user32.dll",
-        RegisterClassExA,
-        register_class_ex_a,
-        unsafe extern "system" fn(*const WNDCLASSEXA) -> u16
-    ),
-    hook!(
-        "user32.dll",
-        RegisterClassExW,
-        register_class_ex_w,
-        unsafe extern "system" fn(*const WNDCLASSEXW) -> u16
-    ),
-    hook!(
-        "user32.dll",
-        PeekMessageA,
-        peek_message_a,
-        unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32,
-    ),
-    hook!(
-        "user32.dll",
-        PeekMessageW,
-        peek_message_w,
-        unsafe extern "system" fn(*mut MSG, HWND, u32, u32, u32) -> i32,
-    ),
-    hook!(
-        "user32.dll",
-        GetMessageA,
-        get_message_a,
-        unsafe extern "system" fn(*mut MSG, HWND, u32, u32) -> i32
-    ),
-    hook!(
-        "user32.dll",
-        GetMessageW,
-        get_message_w,
-        unsafe extern "system" fn(*mut MSG, HWND, u32, u32) -> i32
-    ),
+pub(crate) const HOOKS: &[(&str, &str, *const c_void)] = &hooks![
+    RegisterClassExA,
+    RegisterClassExW,
+    PeekMessageA,
+    PeekMessageW,
+    GetMessageA,
+    GetMessageW,
 ];
 
-unsafe extern "system" fn register_class_ex_a(information: *const WNDCLASSEXA) -> u16 {
+#[hook("user32.dll")]
+unsafe extern "system" fn RegisterClassExA(information: *const WNDCLASSEXA) -> u16 {
     unsafe { register_class_ex(information, false) }
 }
 
-unsafe extern "system" fn register_class_ex_w(information: *const WNDCLASSEXW) -> u16 {
+#[hook("user32.dll")]
+unsafe extern "system" fn RegisterClassExW(information: *const WNDCLASSEXW) -> u16 {
     unsafe { register_class_ex(information.cast::<WNDCLASSEXA>(), true) }
 }
 
@@ -153,7 +126,8 @@ unsafe extern "system" fn window_procedure(
     }
 }
 
-unsafe extern "system" fn peek_message_a(
+#[hook("user32.dll")]
+unsafe extern "system" fn PeekMessageA(
     message: *mut MSG,
     window_filter: HWND,
     minimum_id_filter: u32,
@@ -172,7 +146,8 @@ unsafe extern "system" fn peek_message_a(
     }
 }
 
-unsafe extern "system" fn peek_message_w(
+#[hook("user32.dll")]
+unsafe extern "system" fn PeekMessageW(
     message: *mut MSG,
     window_filter: HWND,
     minimum_id_filter: u32,
@@ -271,7 +246,8 @@ unsafe fn peek_message(
     }
 }
 
-unsafe extern "system" fn get_message_a(
+#[hook("user32.dll")]
+unsafe extern "system" fn GetMessageA(
     message: *mut MSG,
     window_filter: HWND,
     minimum_id_filter: u32,
@@ -288,7 +264,8 @@ unsafe extern "system" fn get_message_a(
     }
 }
 
-unsafe extern "system" fn get_message_w(
+#[hook("user32.dll")]
+unsafe extern "system" fn GetMessageW(
     message: *mut MSG,
     window_filter: HWND,
     minimum_id_filter: u32,

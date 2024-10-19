@@ -1,5 +1,6 @@
-use super::common::{get_trampoline, hook};
+use super::common::get_trampoline;
 use crate::state::{self, State, WaitableTimer, STATE};
+use hooks_macros::{hook, hooks};
 use std::{
     num::NonZeroU64,
     sync::{Arc, Mutex},
@@ -23,125 +24,50 @@ use winapi::{
     },
 };
 
-pub(crate) const HOOKS: &[(&str, &str, *const c_void)] = &[
-    hook!("kernel32.dll", Sleep, sleep, unsafe extern "system" fn(u32)),
-    hook!(
-        "kernel32.dll",
-        GetTickCount,
-        get_tick_count,
-        unsafe extern "system" fn() -> u32,
-    ),
-    hook!(
-        "kernel32.dll",
-        GetTickCount64,
-        get_tick_count_64,
-        unsafe extern "system" fn() -> u64,
-    ),
-    hook!(
-        "winmm.dll",
-        timeGetTime,
-        time_get_time,
-        unsafe extern "system" fn() -> u32,
-    ),
-    hook!(
-        "kernel32.dll",
-        QueryPerformanceFrequency,
-        query_performance_frequency,
-        unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
-    ),
-    hook!(
-        "kernel32.dll",
-        QueryPerformanceCounter,
-        query_performance_counter,
-        unsafe extern "system" fn(*mut LARGE_INTEGER) -> i32,
-    ),
-    hook!(
-        "kernel32.dll",
-        GetSystemTimeAsFileTime,
-        get_system_time_as_file_time,
-        unsafe extern "system" fn(*mut FILETIME),
-    ),
-    hook!(
-        "kernel32.dll",
-        GetSystemTimePreciseAsFileTime,
-        get_system_time_precise_as_file_time,
-        unsafe extern "system" fn(*mut FILETIME),
-    ),
-    hook!(
-        "kernel32.dll",
-        CreateWaitableTimerA,
-        create_waitable_timer_a,
-        unsafe extern "system" fn(*mut SECURITY_ATTRIBUTES, i32, *const i8) -> *mut c_void,
-    ),
-    hook!(
-        "kernel32.dll",
-        CreateWaitableTimerW,
-        create_waitable_timer_w,
-        unsafe extern "system" fn(*mut SECURITY_ATTRIBUTES, i32, *const u16) -> *mut c_void,
-    ),
-    hook!(
-        "kernel32.dll",
-        CreateWaitableTimerExA,
-        create_waitable_timer_ex_a,
-        unsafe extern "system" fn(*mut SECURITY_ATTRIBUTES, *const i8, u32, u32) -> *mut c_void,
-    ),
-    hook!(
-        "kernel32.dll",
-        CreateWaitableTimerExW,
-        create_waitable_timer_ex_w,
-        unsafe extern "system" fn(*mut SECURITY_ATTRIBUTES, *const u16, u32, u32) -> *mut c_void,
-    ),
-    hook!(
-        "kernel32.dll",
-        SetWaitableTimer,
-        set_waitable_timer,
-        unsafe extern "system" fn(
-            *mut c_void,
-            *const LARGE_INTEGER,
-            i32,
-            Option<unsafe extern "system" fn(*mut c_void, u32, u32)>,
-            *mut c_void,
-            i32,
-        ) -> i32,
-    ),
-    hook!(
-        "kernelbase.dll",
-        SetWaitableTimerEx,
-        set_waitable_timer_ex,
-        unsafe extern "system" fn(
-            *mut c_void,
-            *const LARGE_INTEGER,
-            i32,
-            Option<unsafe extern "system" fn(*mut c_void, u32, u32)>,
-            *mut c_void,
-            *mut REASON_CONTEXT,
-            u32,
-        ) -> i32,
-    ),
+pub(crate) const HOOKS: &[(&str, &str, *const c_void)] = &hooks![
+    Sleep,
+    GetTickCount,
+    GetTickCount64,
+    timeGetTime,
+    QueryPerformanceFrequency,
+    QueryPerformanceCounter,
+    GetSystemTimeAsFileTime,
+    GetSystemTimePreciseAsFileTime,
+    CreateWaitableTimerA,
+    CreateWaitableTimerW,
+    CreateWaitableTimerExA,
+    CreateWaitableTimerExW,
+    SetWaitableTimer,
+    SetWaitableTimerEx,
 ];
 
-unsafe extern "system" fn sleep(milliseconds: u32) {
+#[hook("kernel32.dll")]
+unsafe extern "system" fn Sleep(milliseconds: u32) {
     state::sleep(u64::from(milliseconds) * State::TICKS_PER_SECOND / 1000);
 }
 
 #[expect(clippy::cast_possible_truncation)]
-extern "system" fn get_tick_count() -> u32 {
+#[hook("kernel32.dll")]
+unsafe extern "system" fn GetTickCount() -> u32 {
     (state::get_ticks_with_busy_wait() * 1000 / State::TICKS_PER_SECOND) as u32
 }
 
 #[expect(clippy::cast_possible_truncation)]
-extern "system" fn get_tick_count_64() -> u64 {
+#[hook("kernel32.dll")]
+unsafe extern "system" fn GetTickCount64() -> u64 {
     (u128::from(state::get_ticks_with_busy_wait()) * 1000 / u128::from(State::TICKS_PER_SECOND))
         as u64
 }
 
-extern "system" fn time_get_time() -> u32 {
-    get_tick_count()
+#[hook("winmm.dll")]
+unsafe extern "system" fn timeGetTime() -> u32 {
+    unsafe { GetTickCount() }
 }
 
 const SIMULATED_PERFORMANCE_COUNTER_FREQUENCY: u64 = 1 << 32;
 
-unsafe extern "system" fn query_performance_frequency(frequency: *mut LARGE_INTEGER) -> i32 {
+#[hook("kernel32.dll")]
+unsafe extern "system" fn QueryPerformanceFrequency(frequency: *mut LARGE_INTEGER) -> i32 {
     #[expect(clippy::cast_possible_wrap)]
     unsafe {
         *(*frequency).QuadPart_mut() = SIMULATED_PERFORMANCE_COUNTER_FREQUENCY as i64;
@@ -150,7 +76,8 @@ unsafe extern "system" fn query_performance_frequency(frequency: *mut LARGE_INTE
     1
 }
 
-unsafe extern "system" fn query_performance_counter(count: *mut LARGE_INTEGER) -> i32 {
+#[hook("kernel32.dll")]
+unsafe extern "system" fn QueryPerformanceCounter(count: *mut LARGE_INTEGER) -> i32 {
     #[expect(clippy::cast_possible_wrap)]
     unsafe {
         let simulated_performance_counter = state::get_ticks_with_busy_wait()
@@ -162,7 +89,8 @@ unsafe extern "system" fn query_performance_counter(count: *mut LARGE_INTEGER) -
     1
 }
 
-unsafe extern "system" fn get_system_time_as_file_time(file_time: *mut FILETIME) {
+#[hook("kernel32.dll")]
+unsafe extern "system" fn GetSystemTimeAsFileTime(file_time: *mut FILETIME) {
     #[expect(clippy::cast_possible_truncation)]
     let one_hundred_nanosecond_intervals = (u128::from(state::get_ticks_with_busy_wait())
         * 10_000_000
@@ -174,17 +102,19 @@ unsafe extern "system" fn get_system_time_as_file_time(file_time: *mut FILETIME)
     }
 }
 
-unsafe extern "system" fn get_system_time_precise_as_file_time(file_time: *mut FILETIME) {
-    unsafe { get_system_time_as_file_time(file_time) }
+#[hook("kernel32.dll")]
+unsafe extern "system" fn GetSystemTimePreciseAsFileTime(file_time: *mut FILETIME) {
+    unsafe { GetSystemTimeAsFileTime(file_time) }
 }
 
-unsafe extern "system" fn create_waitable_timer_a(
+#[hook("kernel32.dll")]
+unsafe extern "system" fn CreateWaitableTimerA(
     security_attributes: *mut SECURITY_ATTRIBUTES,
     manual_reset: i32,
     timer_name: *const i8,
 ) -> *mut c_void {
     unsafe {
-        create_waitable_timer_ex_a(
+        CreateWaitableTimerExA(
             security_attributes,
             timer_name.cast(),
             if manual_reset == 1 {
@@ -197,13 +127,14 @@ unsafe extern "system" fn create_waitable_timer_a(
     }
 }
 
-unsafe extern "system" fn create_waitable_timer_w(
+#[hook("kernel32.dll")]
+unsafe extern "system" fn CreateWaitableTimerW(
     security_attributes: *mut SECURITY_ATTRIBUTES,
     manual_reset: i32,
     timer_name: *const u16,
 ) -> *mut c_void {
     unsafe {
-        create_waitable_timer_ex_w(
+        CreateWaitableTimerExW(
             security_attributes,
             timer_name.cast(),
             if manual_reset == 1 {
@@ -216,14 +147,15 @@ unsafe extern "system" fn create_waitable_timer_w(
     }
 }
 
-unsafe extern "system" fn create_waitable_timer_ex_a(
+#[hook("kernel32.dll")]
+unsafe extern "system" fn CreateWaitableTimerExA(
     security_attributes: *mut SECURITY_ATTRIBUTES,
     timer_name: *const i8,
     flags: u32,
     desired_access: u32,
 ) -> *mut c_void {
     unsafe {
-        create_waitable_timer_ex(
+        create_waitable_timer(
             security_attributes,
             timer_name.cast(),
             flags,
@@ -233,14 +165,15 @@ unsafe extern "system" fn create_waitable_timer_ex_a(
     }
 }
 
-unsafe extern "system" fn create_waitable_timer_ex_w(
+#[hook("kernel32.dll")]
+unsafe extern "system" fn CreateWaitableTimerExW(
     security_attributes: *mut SECURITY_ATTRIBUTES,
     timer_name: *const u16,
     flags: u32,
     desired_access: u32,
 ) -> *mut c_void {
     unsafe {
-        create_waitable_timer_ex(
+        create_waitable_timer(
             security_attributes,
             timer_name.cast(),
             flags,
@@ -250,7 +183,7 @@ unsafe extern "system" fn create_waitable_timer_ex_w(
     }
 }
 
-unsafe fn create_waitable_timer_ex(
+unsafe fn create_waitable_timer(
     security_attributes: *mut SECURITY_ATTRIBUTES,
     timer_name: *const c_void,
     flags: u32,
@@ -303,7 +236,8 @@ unsafe fn create_waitable_timer_ex(
     result
 }
 
-unsafe extern "system" fn set_waitable_timer(
+#[hook("kernel32.dll")]
+unsafe extern "system" fn SetWaitableTimer(
     timer: *mut c_void,
     due_time: *const LARGE_INTEGER,
     period: i32,
@@ -338,7 +272,8 @@ unsafe extern "system" fn set_waitable_timer(
     result
 }
 
-unsafe extern "system" fn set_waitable_timer_ex(
+#[hook("kernelbase.dll")]
+unsafe extern "system" fn SetWaitableTimerEx(
     timer: *mut c_void,
     due_time: *const LARGE_INTEGER,
     period: i32,

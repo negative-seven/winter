@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "hooks",
+    "hooks_macros",
     "shared",
     "winter",
     "winter/tests/utilities",
