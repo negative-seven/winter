@@ -7,18 +7,6 @@ use test_utilities_macros::test_for;
 use winter::MouseButton;
 
 #[test_for(architecture, unicode)]
-async fn GetCommandLine(architecture: Architecture, unicode: bool) -> Result<()> {
-    init_test();
-    let stdout = Instance::new("hooks/misc/GetCommandLine", architecture)
-        .with_unicode_flag(unicode)
-        .with_command_line_string("abcABC123!\"_".into())
-        .stdout()
-        .await?;
-    assert_eq!(stdout, b"abcABC123!\"_");
-    Ok(())
-}
-
-#[test_for(architecture, unicode)]
 async fn RegisterClassEx(architecture: Architecture, unicode: bool) -> Result<()> {
     init_test();
     let stdout = Instance::new("hooks/misc/RegisterClassEx", architecture)
@@ -291,15 +279,5 @@ async fn PeekMessage_with_mouse_messages(architecture: Architecture, unicode: bo
             message(WM_XBUTTONUP, 2 << 16, (33 << 16) | 44),
         ]
     );
-    Ok(())
-}
-
-#[test_for(architecture)]
-async fn NtSetInformationThread(architecture: Architecture) -> Result<()> {
-    init_test();
-    let stdout = Instance::new("hooks/misc/NtSetInformationThread", architecture)
-        .stdout_from_utf8_lossy()
-        .await?;
-    assert_eq!(stdout, "start\r\nbreakpoint\r\nend\r\n");
     Ok(())
 }
