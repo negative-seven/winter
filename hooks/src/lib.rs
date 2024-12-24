@@ -92,30 +92,21 @@ pub(crate) use log;
 
 #[expect(clippy::missing_safety_doc)]
 #[no_mangle]
-pub unsafe extern "system" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
+pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
     let mut initialized_message_sender;
     let mut message_receiver;
 
     unsafe {
-        let initial_message = std::ptr::read_unaligned(initial_message_pointer);
+        let initial_message = ConductorInitialMessage::deserialize_from_bytes(
+            &std::ptr::read_unaligned(initial_message_pointer.cast()),
+        );
         process::Process::get_current()
             .free_memory(initial_message_pointer as usize)
             .unwrap();
-        initialized_message_sender = communication::Sender::<InitializedMessage>::from_bytes(
-            initial_message.serialized_initialized_message_sender,
-        );
-        LOG_MESSAGE_SENDER =
-            MaybeUninit::new(Mutex::new(communication::Sender::<LogMessage>::from_bytes(
-                initial_message.serialized_log_message_sender,
-            )));
-        IDLE_MESSAGE_SENDER = MaybeUninit::new(Mutex::new(
-            communication::Sender::<IdleMessage>::from_bytes(
-                initial_message.serialized_idle_message_sender,
-            ),
-        ));
-        message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
-            initial_message.serialized_message_receiver,
-        );
+        initialized_message_sender = initial_message.initialized_message_sender;
+        LOG_MESSAGE_SENDER = MaybeUninit::new(Mutex::new(initial_message.log_message_sender));
+        IDLE_MESSAGE_SENDER = MaybeUninit::new(Mutex::new(initial_message.idle_message_sender));
+        message_receiver = initial_message.message_receiver;
         state::MAIN_THREAD_ID.write(initial_message.main_thread_id);
         EVENT_QUEUE.write(EventQueue::new());
     }

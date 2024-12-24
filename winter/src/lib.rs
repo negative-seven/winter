@@ -77,23 +77,23 @@ impl Conductor {
         };
         subprocess.inject_dll(hooks_library).await?;
 
-        let initial_message = unsafe {
-            bincode::serialize(&ConductorInitialMessage {
-                main_thread_id: main_thread.get_id()?,
-                serialized_initialized_message_sender: hooks_initialized_sender.leak_to_bytes(),
-                serialized_log_message_sender: hooks_log_sender.leak_to_bytes(),
-                serialized_idle_message_sender: hooks_idle_sender.leak_to_bytes(),
-                serialized_message_receiver: hooks_receiver.leak_to_bytes(),
-            })?
+        let initial_message = ConductorInitialMessage {
+            main_thread_id: main_thread.get_id()?,
+            initialized_message_sender: hooks_initialized_sender,
+            log_message_sender: hooks_log_sender,
+            idle_message_sender: hooks_idle_sender,
+            message_receiver: hooks_receiver,
         };
+        let initial_message_serialized = initial_message.serialize_to_bytes();
+        std::mem::forget(initial_message); // prevent senders and receivers from being dropped
         let initial_message_pointer = subprocess.allocate_memory(
-            initial_message.len(),
+            initial_message_serialized.len(),
             process::MemoryPermissions {
                 rwe: process::MemoryPermissionsRwe::ReadWrite,
                 is_guard: false,
             },
         )?;
-        subprocess.write(initial_message_pointer, &initial_message)?;
+        subprocess.write(initial_message_pointer, &initial_message_serialized)?;
         subprocess.create_thread(
             subprocess.get_export_address(hooks_library, "initialize")?,
             false,

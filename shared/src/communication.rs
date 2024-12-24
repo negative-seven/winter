@@ -44,24 +44,7 @@ impl<S: Serialize + Debug> Sender<S> {
 
     #[must_use]
     #[expect(clippy::missing_panics_doc)]
-    pub unsafe fn from_bytes(bytes: [u8; 12]) -> Self {
-        unsafe {
-            let mut handles = bytes
-                .chunks(4)
-                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
-
-            Self {
-                pipe: pipe::Writer::new(handles.next().unwrap()),
-                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-                _phantom_data: PhantomData,
-            }
-        }
-    }
-
-    #[must_use]
-    #[expect(clippy::missing_panics_doc)]
-    pub unsafe fn leak_to_bytes(self) -> [u8; 12] {
+    pub fn serialize_to_bytes(&self) -> [u8; 12] {
         let bytes = unsafe {
             [
                 self.pipe.handle().as_raw() as u32,
@@ -74,8 +57,24 @@ impl<S: Serialize + Debug> Sender<S> {
         .collect::<Vec<_>>()
         .try_into()
         .unwrap();
-        std::mem::forget(self);
         bytes
+    }
+
+    #[must_use]
+    #[expect(clippy::missing_panics_doc)]
+    pub unsafe fn deserialize_from_bytes(bytes: [u8; 12]) -> Self {
+        unsafe {
+            let mut handles = bytes
+                .chunks(4)
+                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
+
+            Self {
+                pipe: pipe::Writer::new(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                _phantom_data: PhantomData,
+            }
+        }
     }
 }
 
@@ -111,24 +110,7 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
 
     #[must_use]
     #[expect(clippy::missing_panics_doc)]
-    pub unsafe fn from_bytes(bytes: [u8; 12]) -> Self {
-        unsafe {
-            let mut handles = bytes
-                .chunks(4)
-                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
-
-            Self {
-                pipe: pipe::Reader::new(handles.next().unwrap()),
-                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-                _phantom_data: PhantomData,
-            }
-        }
-    }
-
-    #[must_use]
-    #[expect(clippy::missing_panics_doc)]
-    pub unsafe fn leak_to_bytes(self) -> [u8; 12] {
+    pub fn serialize_to_bytes(&self) -> [u8; 12] {
         let bytes = unsafe {
             [
                 self.pipe.handle().as_raw() as u32,
@@ -141,8 +123,24 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
         .collect::<Vec<_>>()
         .try_into()
         .unwrap();
-        std::mem::forget(self);
         bytes
+    }
+
+    #[must_use]
+    #[expect(clippy::missing_panics_doc)]
+    pub unsafe fn deserialize_from_bytes(bytes: [u8; 12]) -> Self {
+        unsafe {
+            let mut handles = bytes
+                .chunks(4)
+                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
+
+            Self {
+                pipe: pipe::Reader::new(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                _phantom_data: PhantomData,
+            }
+        }
     }
 }
 
@@ -177,13 +175,55 @@ pub enum NewSenderAndReceiverError {
     CloneEvent(#[from] event::CloneError),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct ConductorInitialMessage {
     pub main_thread_id: u32,
-    pub serialized_initialized_message_sender: [u8; 12],
-    pub serialized_log_message_sender: [u8; 12],
-    pub serialized_idle_message_sender: [u8; 12],
-    pub serialized_message_receiver: [u8; 12],
+    pub initialized_message_sender: Sender<InitializedMessage>,
+    pub log_message_sender: Sender<LogMessage>,
+    pub idle_message_sender: Sender<IdleMessage>,
+    pub message_receiver: Receiver<ConductorMessage>,
+}
+
+impl ConductorInitialMessage {
+    #[must_use]
+    pub fn serialize_to_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![];
+        bytes.extend(self.main_thread_id.to_ne_bytes());
+        bytes.extend(self.initialized_message_sender.serialize_to_bytes());
+        bytes.extend(self.log_message_sender.serialize_to_bytes());
+        bytes.extend(self.idle_message_sender.serialize_to_bytes());
+        bytes.extend(self.message_receiver.serialize_to_bytes());
+        bytes
+    }
+
+    /// # Panics
+    /// Panics if `bytes` does not have the expected length.
+    #[must_use]
+    pub unsafe fn deserialize_from_bytes(bytes: &[u8; 4 + 12 + 12 + 12 + 12]) -> Self {
+        let (serialized_main_thread_id, bytes) = bytes.split_at(4);
+        let (serialized_initialized_message_sender, bytes) = bytes.split_at(12);
+        let (serialized_log_message_sender, bytes) = bytes.split_at(12);
+        let (serialized_idle_message_sender, bytes) = bytes.split_at(12);
+        let (serialized_message_receiver, bytes) = bytes.split_at(12);
+        assert!(bytes.is_empty());
+        unsafe {
+            Self {
+                main_thread_id: u32::from_ne_bytes(serialized_main_thread_id.try_into().unwrap()),
+                initialized_message_sender: Sender::deserialize_from_bytes(
+                    serialized_initialized_message_sender.try_into().unwrap(),
+                ),
+                log_message_sender: Sender::deserialize_from_bytes(
+                    serialized_log_message_sender.try_into().unwrap(),
+                ),
+                idle_message_sender: Sender::deserialize_from_bytes(
+                    serialized_idle_message_sender.try_into().unwrap(),
+                ),
+                message_receiver: Receiver::deserialize_from_bytes(
+                    serialized_message_receiver.try_into().unwrap(),
+                ),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
