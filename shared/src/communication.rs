@@ -180,7 +180,9 @@ pub enum NewSenderAndReceiverError {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ConductorInitialMessage {
     pub main_thread_id: u32,
-    pub serialized_message_sender: [u8; 12],
+    pub serialized_initialized_message_sender: [u8; 12],
+    pub serialized_log_message_sender: [u8; 12],
+    pub serialized_idle_message_sender: [u8; 12],
     pub serialized_message_receiver: [u8; 12],
 }
 
@@ -205,12 +207,16 @@ pub enum MouseButton {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum HooksMessage {
-    HooksInitialized,
-    Idle,
-    Log { level: LogLevel, message: String },
+pub struct InitializedMessage;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LogMessage {
+    pub level: LogLevel,
+    pub message: String,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct IdleMessage;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum LogLevel {

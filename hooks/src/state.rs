@@ -1,6 +1,6 @@
-use crate::{hooks, log, Event, EVENT_QUEUE, MESSAGE_SENDER};
+use crate::{hooks, log, Event, EVENT_QUEUE, IDLE_MESSAGE_SENDER};
 use futures::executor::block_on;
-use shared::communication::{HooksMessage, LogLevel, MouseButton};
+use shared::communication::{IdleMessage, LogLevel, MouseButton};
 use std::{
     collections::{BTreeMap, VecDeque},
     mem::MaybeUninit,
@@ -280,11 +280,11 @@ fn poll_events_for_sleep() {
             }
             Event::Idle => unsafe {
                 block_on(
-                    MESSAGE_SENDER
+                    IDLE_MESSAGE_SENDER
                         .assume_init_ref()
                         .lock()
                         .unwrap()
-                        .send(&HooksMessage::Idle),
+                        .send(&IdleMessage),
                 )
                 .unwrap();
             },

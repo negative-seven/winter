@@ -6,14 +6,17 @@ mod state;
 use futures::executor::block_on;
 use shared::{
     communication::{
-        self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel, MouseButton,
+        self, ConductorInitialMessage, ConductorMessage, IdleMessage, InitializedMessage, LogLevel,
+        LogMessage, MouseButton,
     },
     event::ManualResetEvent,
     process, thread,
 };
 use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex, time::Duration};
 
-static mut MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<HooksMessage>>> =
+static mut LOG_MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<LogMessage>>> =
+    MaybeUninit::uninit();
+static mut IDLE_MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<IdleMessage>>> =
     MaybeUninit::uninit();
 
 #[derive(Debug)]
@@ -74,11 +77,11 @@ static mut EVENT_QUEUE: MaybeUninit<EventQueue> = MaybeUninit::uninit();
 
 macro_rules! log {
     ($level:expr, $($format_args:expr $(,)?),+) => {
-        let message_sender = unsafe { crate::MESSAGE_SENDER.assume_init_ref() };
-        futures::executor::block_on(message_sender
+        let log_message_sender = unsafe { crate::LOG_MESSAGE_SENDER.assume_init_ref() };
+        futures::executor::block_on(log_message_sender
             .lock()
             .unwrap()
-            .send(&shared::communication::HooksMessage::Log {
+            .send(&shared::communication::LogMessage {
                 level: $level,
                 message: format!($($format_args),+),
             }))
@@ -90,15 +93,24 @@ pub(crate) use log;
 #[expect(clippy::missing_safety_doc)]
 #[no_mangle]
 pub unsafe extern "system" fn initialize(initial_message_pointer: *mut ConductorInitialMessage) {
+    let mut initialized_message_sender;
     let mut message_receiver;
+
     unsafe {
         let initial_message = std::ptr::read_unaligned(initial_message_pointer);
         process::Process::get_current()
             .free_memory(initial_message_pointer as usize)
             .unwrap();
-        MESSAGE_SENDER.write(Mutex::new(
-            communication::Sender::<HooksMessage>::from_bytes(
-                initial_message.serialized_message_sender,
+        initialized_message_sender = communication::Sender::<InitializedMessage>::from_bytes(
+            initial_message.serialized_initialized_message_sender,
+        );
+        LOG_MESSAGE_SENDER =
+            MaybeUninit::new(Mutex::new(communication::Sender::<LogMessage>::from_bytes(
+                initial_message.serialized_log_message_sender,
+            )));
+        IDLE_MESSAGE_SENDER = MaybeUninit::new(Mutex::new(
+            communication::Sender::<IdleMessage>::from_bytes(
+                initial_message.serialized_idle_message_sender,
             ),
         ));
         message_receiver = communication::Receiver::<ConductorMessage>::from_bytes(
@@ -107,7 +119,6 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut Conductor
         state::MAIN_THREAD_ID.write(initial_message.main_thread_id);
         EVENT_QUEUE.write(EventQueue::new());
     }
-    let message_sender = unsafe { MESSAGE_SENDER.assume_init_ref() };
 
     std::panic::set_hook(Box::new(|panic_info| {
         log!(
@@ -129,16 +140,11 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut Conductor
 
     hooks::initialize();
 
-    block_on(
-        message_sender
-            .lock()
-            .unwrap()
-            .send(&HooksMessage::HooksInitialized),
-    )
-    .unwrap();
+    block_on(initialized_message_sender.send(&InitializedMessage)).unwrap();
+
     log!(
         LogLevel::Debug,
-        "assuming thread with id 0x{:x} to be the main thread",
+        "assuming thread with id {:#x} to be the main thread",
         unsafe { state::MAIN_THREAD_ID.assume_init_ref() }
     );
     loop {

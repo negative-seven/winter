@@ -1,13 +1,15 @@
 mod saved_state;
 
-use saved_state::SavedState;
 pub use shared::communication::MouseButton;
 
 use anyhow::Result;
+use saved_state::SavedState;
 use shared::{
-    communication::{self, ConductorInitialMessage, ConductorMessage, HooksMessage, LogLevel},
-    event::{self, ManualResetEvent},
-    pipe,
+    communication::{
+        self, ConductorInitialMessage, ConductorMessage, IdleMessage, InitializedMessage, LogLevel,
+        LogMessage,
+    },
+    event, pipe,
     process::{self, CheckIs64BitError},
     thread,
 };
@@ -26,8 +28,8 @@ pub struct Conductor {
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
     message_sender: communication::Sender<ConductorMessage>,
-    idle: ManualResetEvent,
-    receive_messages_task: Option<tokio::task::JoinHandle<()>>,
+    idle_message_receiver: communication::Receiver<IdleMessage>,
+    receive_log_messages_task: Option<tokio::task::JoinHandle<()>>,
     saved_state: Option<SavedState>,
 }
 
@@ -45,7 +47,12 @@ impl Conductor {
         // sender/receiver pairs must be created before the process, so that their
         // handles can be inherited
         let (conductor_sender, hooks_receiver) = communication::new_sender_and_receiver()?;
-        let (hooks_sender, mut conductor_receiver) = communication::new_sender_and_receiver()?;
+        let (hooks_initialized_sender, mut conductor_initialized_receiver) =
+            communication::new_sender_and_receiver::<InitializedMessage>()?;
+        let (hooks_log_sender, mut conductor_log_receiver) =
+            communication::new_sender_and_receiver::<LogMessage>()?;
+        let (hooks_idle_sender, conductor_idle_receiver) =
+            communication::new_sender_and_receiver::<IdleMessage>()?;
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
@@ -70,11 +77,15 @@ impl Conductor {
         };
         subprocess.inject_dll(hooks_library).await?;
 
-        let initial_message = bincode::serialize(&ConductorInitialMessage {
-            main_thread_id: main_thread.get_id()?,
-            serialized_message_sender: unsafe { hooks_sender.leak_to_bytes() },
-            serialized_message_receiver: unsafe { hooks_receiver.leak_to_bytes() },
-        })?;
+        let initial_message = unsafe {
+            bincode::serialize(&ConductorInitialMessage {
+                main_thread_id: main_thread.get_id()?,
+                serialized_initialized_message_sender: hooks_initialized_sender.leak_to_bytes(),
+                serialized_log_message_sender: hooks_log_sender.leak_to_bytes(),
+                serialized_idle_message_sender: hooks_idle_sender.leak_to_bytes(),
+                serialized_message_receiver: hooks_receiver.leak_to_bytes(),
+            })?
+        };
         let initial_message_pointer = subprocess.allocate_memory(
             initial_message.len(),
             process::MemoryPermissions {
@@ -89,29 +100,20 @@ impl Conductor {
             Some(initial_message_pointer as _),
         )?;
 
-        match conductor_receiver.receive().await? {
-            HooksMessage::HooksInitialized => (),
-            message => return Err(UnexpectedMessageError::new(message).into()),
-        }
+        conductor_initialized_receiver.receive().await?;
 
-        let idle = ManualResetEvent::new()?;
-        let receive_messages_task = {
-            let mut idle = idle.try_clone().unwrap();
+        let receive_log_messages_task = {
             tokio::spawn(async move {
                 loop {
-                    match conductor_receiver.receive().await.unwrap() {
-                        HooksMessage::Idle => idle.set().unwrap(),
-                        HooksMessage::Log { level, message } => {
-                            match level {
-                                LogLevel::Trace => tracing::trace!(target: "hooks", message),
-                                LogLevel::Debug => tracing::debug!(target: "hooks", message),
-                                LogLevel::Info => tracing::info!(target: "hooks", message),
-                                LogLevel::Warning => tracing::warn!(target: "hooks", message),
-                                LogLevel::Error => tracing::error!(target: "hooks", message),
-                            };
-                        }
-                        message => unimplemented!("handle message {message:?}"),
-                    }
+                    let LogMessage { level, message } =
+                        conductor_log_receiver.receive().await.unwrap();
+                    match level {
+                        LogLevel::Trace => tracing::trace!(target: "hooks", message),
+                        LogLevel::Debug => tracing::debug!(target: "hooks", message),
+                        LogLevel::Info => tracing::info!(target: "hooks", message),
+                        LogLevel::Warning => tracing::warn!(target: "hooks", message),
+                        LogLevel::Error => tracing::error!(target: "hooks", message),
+                    };
                 }
             })
         };
@@ -124,8 +126,8 @@ impl Conductor {
             },
             stdout_pipe_reader,
             message_sender: conductor_sender,
-            idle,
-            receive_messages_task: Some(receive_messages_task),
+            idle_message_receiver: conductor_idle_receiver,
+            receive_log_messages_task: Some(receive_log_messages_task),
             saved_state: None,
         })
     }
@@ -188,14 +190,13 @@ impl Conductor {
     }
 
     pub async fn wait_until_inactive(&mut self) -> Result<InactiveState, WaitUntilInactiveError> {
-        self.idle.reset()?;
         let mut stdout = Vec::new();
         let state = select! {
             result = async {
                 self.message_sender
                     .send(&ConductorMessage::IdleRequest)
                     .await?;
-                self.idle.wait().await?;
+                self.idle_message_receiver.receive().await?;
                 Ok::<_, WaitUntilInactiveError>(())
             } => {
                 result?;
@@ -203,7 +204,7 @@ impl Conductor {
             }
             result = self.process.join() => {
                 let exit_code = result?;
-                if let Some(task) = self.receive_messages_task.take() {
+                if let Some(task) = self.receive_log_messages_task.take() {
                     task.abort();
                 }
                 InactiveState::Terminated { exit_code }
@@ -238,12 +239,6 @@ pub enum InactiveState {
 }
 
 #[derive(Debug, Error)]
-#[error("unexpected message received: {message:?}")]
-pub struct UnexpectedMessageError {
-    message: HooksMessage,
-}
-
-#[derive(Debug, Error)]
 #[error("failed to create conductor")]
 pub enum NewError {
     NewPipe(#[from] pipe::NewError),
@@ -259,18 +254,10 @@ pub enum NewError {
     ProcessWriteMemory(#[from] process::WriteMemoryError),
     GetExportAddress(#[from] process::GetExportAddressError),
     NewEvent(#[from] event::NewError),
-    ProcessCreateTHread(#[from] process::CreateThreadError),
+    ProcessCreateThread(#[from] process::CreateThreadError),
     MessageReceive(#[from] communication::ReceiveError),
-    UnexpectedMessage(#[from] UnexpectedMessageError),
     Bincode(#[from] bincode::Error),
     IterThreadIds(#[from] process::IterThreadIdsError),
-}
-
-impl UnexpectedMessageError {
-    #[must_use]
-    pub fn new(message: HooksMessage) -> Self {
-        Self { message }
-    }
 }
 
 #[derive(Debug, Error)]
@@ -321,9 +308,8 @@ pub enum LoadStateError {
 #[derive(Debug, Error)]
 #[error("error occurred while waiting for the subprocess to become inactive")]
 pub enum WaitUntilInactiveError {
-    EventWait(#[from] event::WaitError),
-    EventReset(#[from] event::ResetError),
     ProcessJoin(#[from] process::JoinError),
     MessageSend(#[from] communication::SendError),
+    MessageReceive(#[from] communication::ReceiveError),
     Os(#[from] io::Error),
 }
