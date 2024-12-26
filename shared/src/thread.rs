@@ -1,5 +1,5 @@
 use crate::{
-    handle::Handle,
+    handle::handle_wrapper,
     process::{self},
 };
 use std::{io, mem::MaybeUninit};
@@ -18,10 +18,7 @@ use winapi::{
     },
 };
 
-#[derive(Debug)]
-pub struct Thread {
-    handle: Handle,
-}
+handle_wrapper!(Thread);
 
 impl Thread {
     #[instrument(ret(level = Level::DEBUG), err)]
@@ -31,17 +28,7 @@ impl Thread {
             return Err(FromIdError(io::Error::last_os_error()));
         }
 
-        unsafe { Ok(Self::from_handle(Handle::from_raw(handle))) }
-    }
-
-    #[instrument(ret(level = Level::DEBUG))]
-    pub unsafe fn from_handle(handle: Handle) -> Self {
-        Self { handle }
-    }
-
-    #[must_use]
-    pub unsafe fn handle(&self) -> &Handle {
-        &self.handle
+        unsafe { Ok(Self::from_raw_handle(handle)) }
     }
 
     #[instrument(ret(level = Level::DEBUG), err)]

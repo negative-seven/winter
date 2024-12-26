@@ -1,5 +1,5 @@
 use crate::{
-    handle::{self, Handle},
+    handle::{self, handle_wrapper, Handle},
     pipe,
     thread::Thread,
 };
@@ -48,17 +48,12 @@ use winapi::{
     },
 };
 
-#[derive(Debug)]
-pub struct Process {
-    handle: Handle,
-}
+handle_wrapper!(Process);
 
 impl Process {
     #[must_use]
     pub fn get_current() -> Self {
-        Self {
-            handle: unsafe { Handle::from_raw(GetCurrentProcess()) },
-        }
+        unsafe { Self::from_raw_handle(GetCurrentProcess()) }
     }
 
     pub fn from_id(id: u32) -> Result<Self, io::Error> {
@@ -66,9 +61,7 @@ impl Process {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self {
-            handle: unsafe { Handle::from_raw(handle) },
-        })
+        unsafe { Ok(Self::from_raw_handle(handle)) }
     }
 
     #[instrument(
@@ -126,11 +119,11 @@ impl Process {
             cbReserved2: 0,
             lpReserved2: NULL.cast(),
             hStdInput: stdin_redirect
-                .map_or_else(|| NULL.cast(), |reader| unsafe { reader.leak() }),
+                .map_or_else(|| NULL.cast(), |reader| unsafe { reader.leak_handle() }),
             hStdOutput: stdout_redirect
-                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.leak() }),
+                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.leak_handle() }),
             hStdError: stderr_redirect
-                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.leak() }),
+                .map_or_else(|| NULL.cast(), |writer| unsafe { writer.leak_handle() }),
         };
         let mut process_information = PROCESS_INFORMATION {
             hProcess: NULL.cast(),
@@ -161,17 +154,10 @@ impl Process {
             drop(executable_directory_path_raw);
 
             // ensure the handle gets cleaned up correctly
-            Thread::from_handle(Handle::from_raw(process_information.hThread));
+            Thread::from_raw_handle(process_information.hThread);
 
-            Ok(Process {
-                handle: Handle::from_raw(process_information.hProcess),
-            })
+            Ok(Process::from_raw_handle(process_information.hProcess))
         }
-    }
-
-    #[must_use]
-    pub unsafe fn handle(&self) -> &Handle {
-        &self.handle
     }
 
     pub fn is_64_bit(&self) -> Result<bool, CheckIs64BitError> {
@@ -471,7 +457,7 @@ impl Process {
             return Err(io::Error::last_os_error().into());
         }
 
-        Ok(unsafe { Thread::from_handle(Handle::from_raw(thread_handle)) })
+        Ok(unsafe { Thread::from_raw_handle(thread_handle) })
     }
 
     #[instrument(

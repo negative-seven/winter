@@ -39,12 +39,12 @@ impl Handle {
 
     pub fn try_clone(&self) -> Result<Self, CloneError> {
         unsafe {
-            let current_process_handle = process::Process::get_current().handle().as_raw();
+            let current_process = process::Process::get_current();
             let mut duplicated_handle = NULL;
             if DuplicateHandle(
-                current_process_handle,
-                self.0,
-                current_process_handle,
+                current_process.raw_handle(),
+                self.as_raw(),
+                current_process.raw_handle(),
                 &mut duplicated_handle,
                 0,
                 TRUE,
@@ -147,6 +147,65 @@ impl Drop for Handle {
 
 unsafe impl Send for Handle {}
 unsafe impl Sync for Handle {}
+
+macro_rules! handle_wrapper {
+    ($name:ident) => {
+        #[derive(Debug)]
+        pub struct $name {
+            handle: std::mem::ManuallyDrop<crate::handle::Handle>,
+        }
+
+        impl $name {
+            #[must_use]
+            pub fn handle(&self) -> &crate::handle::Handle {
+                &self.handle
+            }
+
+            #[must_use]
+            pub unsafe fn raw_handle(&self) -> *mut winapi::ctypes::c_void {
+                unsafe { self.handle.as_raw() }
+            }
+
+            pub unsafe fn from_raw_handle(handle: *mut winapi::ctypes::c_void) -> Self {
+                Self {
+                    handle: unsafe {
+                        std::mem::ManuallyDrop::new(crate::handle::Handle::from_raw(handle))
+                    },
+                }
+            }
+
+            #[must_use]
+            pub unsafe fn leak_handle(mut self) -> *mut winapi::ctypes::c_void {
+                let raw_handle = unsafe { std::mem::ManuallyDrop::take(&mut self.handle).leak() };
+                std::mem::forget(self);
+                raw_handle
+            }
+
+            pub fn try_clone(&self) -> Result<Self, crate::handle::CloneError> {
+                Ok(Self {
+                    handle: std::mem::ManuallyDrop::new(self.handle.try_clone()?),
+                })
+            }
+        }
+
+        impl Drop for $name {
+            fn drop(&mut self) {
+                unsafe {
+                    if winapi::um::handleapi::CloseHandle(self.raw_handle()) == 0 {
+                        let last_os_error = std::io::Error::last_os_error();
+                        panic!(
+                            "failed to drop {} handle {:p}: {}",
+                            stringify!($name),
+                            self.raw_handle(),
+                            last_os_error
+                        );
+                    }
+                }
+            }
+        }
+    };
+}
+pub(crate) use handle_wrapper;
 
 struct WaitHandle(*mut c_void);
 

@@ -1,8 +1,7 @@
-use crate::handle::{self, Handle};
+use crate::handle::{self, handle_wrapper};
 use std::io::{Read, Write};
 use thiserror::Error;
 use winapi::{
-    ctypes::c_void,
     shared::{minwindef::TRUE, ntdef::NULL},
     um::{
         fileapi::{ReadFile, WriteFile},
@@ -32,43 +31,13 @@ pub fn new() -> Result<(Writer, Reader), NewError> {
         }
 
         Ok((
-            Writer {
-                handle: Handle::from_raw(write_handle),
-            },
-            Reader {
-                handle: Handle::from_raw(read_handle),
-            },
+            Writer::from_raw_handle(write_handle),
+            Reader::from_raw_handle(read_handle),
         ))
     }
 }
 
-#[derive(Debug)]
-pub struct Writer {
-    handle: Handle,
-}
-
-impl Writer {
-    pub fn try_clone(&self) -> Result<Self, WriterCloneError> {
-        Ok(Self {
-            handle: self.handle.try_clone()?,
-        })
-    }
-
-    #[must_use]
-    pub unsafe fn new(handle: Handle) -> Self {
-        Self { handle }
-    }
-
-    #[must_use]
-    pub unsafe fn handle(&self) -> &Handle {
-        &self.handle
-    }
-
-    #[must_use]
-    pub unsafe fn leak(self) -> *mut c_void {
-        unsafe { self.handle.leak() }
-    }
-}
+handle_wrapper!(Writer);
 
 impl Write for Writer {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -102,27 +71,7 @@ pub enum WriterCloneError {
     HandleClone(#[from] handle::CloneError),
 }
 
-#[derive(Debug)]
-pub struct Reader {
-    handle: Handle,
-}
-
-impl Reader {
-    #[must_use]
-    pub unsafe fn new(handle: Handle) -> Self {
-        Self { handle }
-    }
-
-    #[must_use]
-    pub unsafe fn handle(&self) -> &Handle {
-        &self.handle
-    }
-
-    #[must_use]
-    pub unsafe fn leak(self) -> *mut c_void {
-        unsafe { self.handle.leak() }
-    }
-}
+handle_wrapper!(Reader);
 
 impl Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {

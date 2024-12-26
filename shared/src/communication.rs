@@ -1,7 +1,6 @@
 use crate::{
     event::{self, ManualResetEvent},
-    handle::Handle,
-    pipe,
+    handle, pipe,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -47,9 +46,9 @@ impl<S: Serialize + Debug> Sender<S> {
     pub fn serialize_to_bytes(&self) -> [u8; 12] {
         let bytes = unsafe {
             [
-                self.pipe.handle().as_raw() as u32,
-                self.send_event.handle().as_raw() as u32,
-                self.acknowledge_event.handle().as_raw() as u32,
+                self.pipe.raw_handle() as u32,
+                self.send_event.raw_handle() as u32,
+                self.acknowledge_event.raw_handle() as u32,
             ]
         }
         .iter()
@@ -66,12 +65,12 @@ impl<S: Serialize + Debug> Sender<S> {
         unsafe {
             let mut handles = bytes
                 .chunks(4)
-                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
+                .map(|chunk| u32::from_ne_bytes(chunk.try_into().unwrap()) as _);
 
             Self {
-                pipe: pipe::Writer::new(handles.next().unwrap()),
-                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                pipe: pipe::Writer::from_raw_handle(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_raw_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_raw_handle(handles.next().unwrap()),
                 _phantom_data: PhantomData,
             }
         }
@@ -113,9 +112,9 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
     pub fn serialize_to_bytes(&self) -> [u8; 12] {
         let bytes = unsafe {
             [
-                self.pipe.handle().as_raw() as u32,
-                self.send_event.handle().as_raw() as u32,
-                self.acknowledge_event.handle().as_raw() as u32,
+                self.pipe.raw_handle() as u32,
+                self.send_event.raw_handle() as u32,
+                self.acknowledge_event.raw_handle() as u32,
             ]
         }
         .iter()
@@ -132,12 +131,12 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
         unsafe {
             let mut handles = bytes
                 .chunks(4)
-                .map(|chunk| Handle::from_raw(u32::from_ne_bytes(chunk.try_into().unwrap()) as _));
+                .map(|chunk| u32::from_ne_bytes(chunk.try_into().unwrap()) as _);
 
             Self {
-                pipe: pipe::Reader::new(handles.next().unwrap()),
-                send_event: ManualResetEvent::from_handle(handles.next().unwrap()),
-                acknowledge_event: ManualResetEvent::from_handle(handles.next().unwrap()),
+                pipe: pipe::Reader::from_raw_handle(handles.next().unwrap()),
+                send_event: ManualResetEvent::from_raw_handle(handles.next().unwrap()),
+                acknowledge_event: ManualResetEvent::from_raw_handle(handles.next().unwrap()),
                 _phantom_data: PhantomData,
             }
         }
@@ -172,7 +171,7 @@ where
 pub enum NewSenderAndReceiverError {
     NewPipe(#[from] pipe::NewError),
     NewEvent(#[from] event::NewError),
-    CloneEvent(#[from] event::CloneError),
+    HandleClone(#[from] handle::CloneError),
 }
 
 #[derive(Debug)]
@@ -290,6 +289,5 @@ pub enum ReceiveError {
 #[derive(Debug, Error)]
 #[error("failed to clone sender")]
 pub enum SenderCloneError {
-    PipeWriterClone(#[from] pipe::WriterCloneError),
-    EventClone(#[from] event::CloneError),
+    HandleClone(#[from] handle::CloneError),
 }

@@ -1,4 +1,4 @@
-use crate::handle::{self, Handle};
+use crate::handle::{self, handle_wrapper};
 use std::io;
 use thiserror::Error;
 use winapi::{
@@ -14,11 +14,7 @@ use winapi::{
     },
 };
 
-#[derive(Debug)]
-#[expect(clippy::module_name_repetitions)]
-pub struct ManualResetEvent {
-    handle: Handle,
-}
+handle_wrapper!(ManualResetEvent);
 
 impl ManualResetEvent {
     pub fn new() -> Result<Self, NewError> {
@@ -39,22 +35,8 @@ impl ManualResetEvent {
             if handle == NULL {
                 return Err(io::Error::last_os_error().into());
             }
-            Ok(Self::from_handle(Handle::from_raw(handle)))
+            Ok(Self::from_raw_handle(handle))
         }
-    }
-
-    #[must_use]
-    pub unsafe fn from_handle(handle: Handle) -> Self {
-        Self { handle }
-    }
-
-    pub fn try_clone(&self) -> Result<Self, CloneError> {
-        unsafe { Ok(Self::from_handle(self.handle.try_clone()?)) }
-    }
-
-    #[must_use]
-    pub unsafe fn handle(&self) -> &Handle {
-        &self.handle
     }
 
     pub fn get(&self) -> Result<bool, GetError> {
