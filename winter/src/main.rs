@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use shared::input::MouseButton;
 use std::{
     ffi::OsString,
     path::PathBuf,
@@ -7,7 +8,7 @@ use std::{
 };
 use tokio::time::sleep;
 use tracing::info;
-use winter::{Conductor, MouseButton};
+use winter::Conductor;
 
 #[expect(clippy::doc_markdown)]
 #[derive(clap::Parser)]

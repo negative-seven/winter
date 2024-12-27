@@ -8,3 +8,4 @@ tokio = "1.37.0"
 tracing = "0.1.39"
 tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
 winter = { path = "../.." }
+shared = { path = "../../../shared" }

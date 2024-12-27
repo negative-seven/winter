@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
 
 use anyhow::Result;
+use shared::input::MouseButton;
 use std::time::Duration;
 use test_utilities::{init_test, Architecture, Event, Instance};
 use test_utilities_macros::test_for;
-use winter::MouseButton;
 
 #[test_for(architecture, unicode)]
 async fn RegisterClassEx(architecture: Architecture, unicode: bool) -> Result<()> {

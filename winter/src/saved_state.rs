@@ -1,9 +1,5 @@
 use itertools::Itertools;
-use shared::{
-    process::{self},
-    system,
-    thread::{self},
-};
+use shared::windows::{process, system, thread};
 use std::{collections::BTreeMap, io};
 use thiserror::Error;
 use tracing::{instrument, trace};

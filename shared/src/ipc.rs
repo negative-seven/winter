@@ -1,4 +1,6 @@
-use crate::{
+pub mod message;
+
+use crate::windows::{
     event::{self, ManualResetEvent},
     handle, pipe,
 };
@@ -7,7 +9,6 @@ use std::{
     fmt::Debug,
     io::{self, Write},
     marker::PhantomData,
-    time::Duration,
 };
 use thiserror::Error;
 
@@ -172,98 +173,6 @@ pub enum NewSenderAndReceiverError {
     NewPipe(#[from] pipe::NewError),
     NewEvent(#[from] event::NewError),
     HandleClone(#[from] handle::CloneError),
-}
-
-#[derive(Debug)]
-pub struct ConductorInitialMessage {
-    pub main_thread_id: u32,
-    pub initialized_message_sender: Sender<InitializedMessage>,
-    pub log_message_sender: Sender<LogMessage>,
-    pub idle_message_sender: Sender<IdleMessage>,
-    pub message_receiver: Receiver<ConductorMessage>,
-}
-
-impl ConductorInitialMessage {
-    #[must_use]
-    pub fn serialize_to_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![];
-        bytes.extend(self.main_thread_id.to_ne_bytes());
-        bytes.extend(self.initialized_message_sender.serialize_to_bytes());
-        bytes.extend(self.log_message_sender.serialize_to_bytes());
-        bytes.extend(self.idle_message_sender.serialize_to_bytes());
-        bytes.extend(self.message_receiver.serialize_to_bytes());
-        bytes
-    }
-
-    /// # Panics
-    /// Panics if `bytes` does not have the expected length.
-    #[must_use]
-    pub unsafe fn deserialize_from_bytes(bytes: &[u8; 4 + 12 + 12 + 12 + 12]) -> Self {
-        let (serialized_main_thread_id, bytes) = bytes.split_at(4);
-        let (serialized_initialized_message_sender, bytes) = bytes.split_at(12);
-        let (serialized_log_message_sender, bytes) = bytes.split_at(12);
-        let (serialized_idle_message_sender, bytes) = bytes.split_at(12);
-        let (serialized_message_receiver, bytes) = bytes.split_at(12);
-        assert!(bytes.is_empty());
-        unsafe {
-            Self {
-                main_thread_id: u32::from_ne_bytes(serialized_main_thread_id.try_into().unwrap()),
-                initialized_message_sender: Sender::deserialize_from_bytes(
-                    serialized_initialized_message_sender.try_into().unwrap(),
-                ),
-                log_message_sender: Sender::deserialize_from_bytes(
-                    serialized_log_message_sender.try_into().unwrap(),
-                ),
-                idle_message_sender: Sender::deserialize_from_bytes(
-                    serialized_idle_message_sender.try_into().unwrap(),
-                ),
-                message_receiver: Receiver::deserialize_from_bytes(
-                    serialized_message_receiver.try_into().unwrap(),
-                ),
-            }
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum ConductorMessage {
-    Resume,
-    AdvanceTime(Duration),
-    SetKeyState { id: u8, state: bool },
-    SetMousePosition { x: u16, y: u16 },
-    SetMouseButtonState { button: MouseButton, state: bool },
-    IdleRequest,
-}
-
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-pub enum MouseButton {
-    Left,
-    Right,
-    Middle,
-    X1,
-    X2,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct InitializedMessage;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct LogMessage {
-    pub level: LogLevel,
-    pub message: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct IdleMessage;
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum LogLevel {
-    Trace,
-    Debug,
-    Info,
-    Warning,
-    Error,
 }
 
 #[derive(Debug, Error)]

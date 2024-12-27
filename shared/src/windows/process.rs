@@ -1,4 +1,4 @@
-use crate::{
+use crate::windows::{
     handle::{self, handle_wrapper, Handle},
     pipe,
     thread::Thread,
@@ -865,7 +865,9 @@ pub struct ThreadIdIterator {
 }
 
 impl ThreadIdIterator {
-    pub(in crate::process) fn new(process_id: u32) -> Result<Self, NewThreadIdIteratorError> {
+    pub(in crate::windows::process) fn new(
+        process_id: u32,
+    ) -> Result<Self, NewThreadIdIteratorError> {
         let snapshot_handle = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
         if snapshot_handle == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error().into());
@@ -929,7 +931,9 @@ struct ModuleEntry32Iterator {
 
 impl ModuleEntry32Iterator {
     #[instrument(ret(level = Level::DEBUG), err)]
-    pub(in crate::process) fn new(process_id: u32) -> Result<Self, NewModuleEntry32IteratorError> {
+    pub(in crate::windows::process) fn new(
+        process_id: u32,
+    ) -> Result<Self, NewModuleEntry32IteratorError> {
         let mut snapshot_handle;
         loop {
             snapshot_handle = unsafe {
@@ -1096,7 +1100,7 @@ pub enum InjectDllError {
     ReadMemory(#[from] ReadMemoryError),
     WriteMemory(#[from] WriteMemoryError),
     CreateThread(#[from] CreateThreadError),
-    JoinThread(#[from] crate::thread::JoinError),
+    JoinThread(#[from] crate::windows::thread::JoinError),
     LoadLibraryThread(#[from] LoadLibraryThreadError),
     CheckIs64Bit(#[from] CheckIs64BitError),
 }

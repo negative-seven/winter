@@ -1,17 +1,15 @@
 mod saved_state;
 
-pub use shared::communication::MouseButton;
-
 use anyhow::Result;
 use saved_state::SavedState;
 use shared::{
-    communication::{
-        self, ConductorInitialMessage, ConductorMessage, IdleMessage, InitializedMessage, LogLevel,
-        LogMessage,
+    input::MouseButton,
+    ipc::{self, Receiver, Sender},
+    windows::{
+        event, pipe,
+        process::{self, CheckIs64BitError},
+        thread,
     },
-    event, pipe,
-    process::{self, CheckIs64BitError},
-    thread,
 };
 use std::{
     ffi::OsStr,
@@ -27,8 +25,8 @@ pub struct Conductor {
     #[expect(clippy::type_complexity)]
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
-    message_sender: communication::Sender<ConductorMessage>,
-    idle_message_receiver: communication::Receiver<IdleMessage>,
+    message_sender: Sender<ipc::message::FromConductor>,
+    idle_message_receiver: Receiver<ipc::message::Idle>,
     receive_log_messages_task: Option<tokio::task::JoinHandle<()>>,
     saved_state: Option<SavedState>,
 }
@@ -46,13 +44,13 @@ impl Conductor {
 
         // sender/receiver pairs must be created before the process, so that their
         // handles can be inherited
-        let (conductor_sender, hooks_receiver) = communication::new_sender_and_receiver()?;
+        let (conductor_sender, hooks_receiver) = ipc::new_sender_and_receiver()?;
         let (hooks_initialized_sender, mut conductor_initialized_receiver) =
-            communication::new_sender_and_receiver::<InitializedMessage>()?;
+            ipc::new_sender_and_receiver::<ipc::message::Initialized>()?;
         let (hooks_log_sender, mut conductor_log_receiver) =
-            communication::new_sender_and_receiver::<LogMessage>()?;
+            ipc::new_sender_and_receiver::<ipc::message::Log>()?;
         let (hooks_idle_sender, conductor_idle_receiver) =
-            communication::new_sender_and_receiver::<IdleMessage>()?;
+            ipc::new_sender_and_receiver::<ipc::message::Idle>()?;
 
         let subprocess = process::Process::create(
             executable_path.as_ref(),
@@ -77,7 +75,7 @@ impl Conductor {
         };
         subprocess.inject_dll(hooks_library).await?;
 
-        let initial_message = ConductorInitialMessage {
+        let initial_message = ipc::message::Initial {
             main_thread_id: main_thread.get_id()?,
             initialized_message_sender: hooks_initialized_sender,
             log_message_sender: hooks_log_sender,
@@ -105,14 +103,14 @@ impl Conductor {
         let receive_log_messages_task = {
             tokio::spawn(async move {
                 loop {
-                    let LogMessage { level, message } =
+                    let ipc::message::Log { level, message } =
                         conductor_log_receiver.receive().await.unwrap();
                     match level {
-                        LogLevel::Trace => tracing::trace!(target: "hooks", message),
-                        LogLevel::Debug => tracing::debug!(target: "hooks", message),
-                        LogLevel::Info => tracing::info!(target: "hooks", message),
-                        LogLevel::Warning => tracing::warn!(target: "hooks", message),
-                        LogLevel::Error => tracing::error!(target: "hooks", message),
+                        ipc::message::LogLevel::Trace => tracing::trace!(target: "hooks", message),
+                        ipc::message::LogLevel::Debug => tracing::debug!(target: "hooks", message),
+                        ipc::message::LogLevel::Info => tracing::info!(target: "hooks", message),
+                        ipc::message::LogLevel::Warning => tracing::warn!(target: "hooks", message),
+                        ipc::message::LogLevel::Error => tracing::error!(target: "hooks", message),
                     };
                 }
             })
@@ -133,13 +131,15 @@ impl Conductor {
     }
 
     pub async fn resume(&mut self) -> Result<(), ResumeError> {
-        self.message_sender.send(&ConductorMessage::Resume).await?;
+        self.message_sender
+            .send(&ipc::message::FromConductor::Resume)
+            .await?;
         Ok(())
     }
 
     pub async fn set_key_state(&mut self, id: u8, state: bool) -> Result<(), SetKeyStateError> {
         self.message_sender
-            .send(&ConductorMessage::SetKeyState { id, state })
+            .send(&ipc::message::FromConductor::SetKeyState { id, state })
             .await?;
         Ok(())
     }
@@ -150,7 +150,7 @@ impl Conductor {
         y: u16,
     ) -> Result<(), SetMousePositionError> {
         self.message_sender
-            .send(&ConductorMessage::SetMousePosition { x, y })
+            .send(&ipc::message::FromConductor::SetMousePosition { x, y })
             .await?;
         Ok(())
     }
@@ -161,14 +161,14 @@ impl Conductor {
         state: bool,
     ) -> Result<(), SetMouseButtonStateError> {
         self.message_sender
-            .send(&ConductorMessage::SetMouseButtonState { button, state })
+            .send(&ipc::message::FromConductor::SetMouseButtonState { button, state })
             .await?;
         Ok(())
     }
 
     pub async fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
         self.message_sender
-            .send(&ConductorMessage::AdvanceTime(time))
+            .send(&ipc::message::FromConductor::AdvanceTime(time))
             .await?;
         Ok(())
     }
@@ -194,7 +194,7 @@ impl Conductor {
         let state = select! {
             result = async {
                 self.message_sender
-                    .send(&ConductorMessage::IdleRequest)
+                    .send(&ipc::message::FromConductor::IdleRequest)
                     .await?;
                 self.idle_message_receiver.receive().await?;
                 Ok::<_, WaitUntilInactiveError>(())
@@ -242,8 +242,8 @@ pub enum InactiveState {
 #[error("failed to create conductor")]
 pub enum NewError {
     NewPipe(#[from] pipe::NewError),
-    NewSenderAndReceiver(#[from] communication::NewSenderAndReceiverError),
-    MessageSenderClone(#[from] communication::SenderCloneError),
+    NewSenderAndReceiver(#[from] ipc::NewSenderAndReceiverError),
+    MessageSenderClone(#[from] ipc::SenderCloneError),
     ProcessCreate(#[from] process::CreateError),
     ThreadFromId(#[from] thread::FromIdError),
     ThreadGetId(#[from] thread::GetIdError),
@@ -255,7 +255,7 @@ pub enum NewError {
     GetExportAddress(#[from] process::GetExportAddressError),
     NewEvent(#[from] event::NewError),
     ProcessCreateThread(#[from] process::CreateThreadError),
-    MessageReceive(#[from] communication::ReceiveError),
+    MessageReceive(#[from] ipc::ReceiveError),
     Bincode(#[from] bincode::Error),
     IterThreadIds(#[from] process::IterThreadIdsError),
 }
@@ -263,31 +263,31 @@ pub enum NewError {
 #[derive(Debug, Error)]
 #[error("error occurred while resuming")]
 pub enum ResumeError {
-    MessageSend(#[from] communication::SendError),
+    MessageSend(#[from] ipc::SendError),
 }
 
 #[derive(Debug, Error)]
 #[error("error occurred while setting key state")]
 pub enum SetKeyStateError {
-    MessageSend(#[from] communication::SendError),
+    MessageSend(#[from] ipc::SendError),
 }
 
 #[derive(Debug, Error)]
 #[error("error occurred while setting key state")]
 pub enum SetMousePositionError {
-    MessageSend(#[from] communication::SendError),
+    MessageSend(#[from] ipc::SendError),
 }
 
 #[derive(Debug, Error)]
 #[error("error occurred while setting key state")]
 pub enum SetMouseButtonStateError {
-    MessageSend(#[from] communication::SendError),
+    MessageSend(#[from] ipc::SendError),
 }
 
 #[derive(Debug, Error)]
 #[error("error occurred while advancing time")]
 pub enum AdvanceTimeError {
-    MessageSend(#[from] communication::SendError),
+    MessageSend(#[from] ipc::SendError),
 }
 
 #[derive(Debug, Error)]
@@ -309,7 +309,7 @@ pub enum LoadStateError {
 #[error("error occurred while waiting for the subprocess to become inactive")]
 pub enum WaitUntilInactiveError {
     ProcessJoin(#[from] process::JoinError),
-    MessageSend(#[from] communication::SendError),
-    MessageReceive(#[from] communication::ReceiveError),
+    MessageSend(#[from] ipc::SendError),
+    MessageReceive(#[from] ipc::ReceiveError),
     Os(#[from] io::Error),
 }

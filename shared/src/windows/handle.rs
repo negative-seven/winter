@@ -1,4 +1,4 @@
-use crate::process;
+use crate::windows::process;
 use std::{
     future::Future,
     io,
@@ -152,12 +152,12 @@ macro_rules! handle_wrapper {
     ($name:ident) => {
         #[derive(Debug)]
         pub struct $name {
-            handle: std::mem::ManuallyDrop<crate::handle::Handle>,
+            handle: std::mem::ManuallyDrop<crate::windows::handle::Handle>,
         }
 
         impl $name {
             #[must_use]
-            pub fn handle(&self) -> &crate::handle::Handle {
+            pub fn handle(&self) -> &crate::windows::handle::Handle {
                 &self.handle
             }
 
@@ -169,7 +169,9 @@ macro_rules! handle_wrapper {
             pub unsafe fn from_raw_handle(handle: *mut winapi::ctypes::c_void) -> Self {
                 Self {
                     handle: unsafe {
-                        std::mem::ManuallyDrop::new(crate::handle::Handle::from_raw(handle))
+                        std::mem::ManuallyDrop::new(crate::windows::handle::Handle::from_raw(
+                            handle,
+                        ))
                     },
                 }
             }
@@ -181,7 +183,7 @@ macro_rules! handle_wrapper {
                 raw_handle
             }
 
-            pub fn try_clone(&self) -> Result<Self, crate::handle::CloneError> {
+            pub fn try_clone(&self) -> Result<Self, crate::windows::handle::CloneError> {
                 Ok(Self {
                     handle: std::mem::ManuallyDrop::new(self.handle.try_clone()?),
                 })

@@ -1,5 +1,5 @@
 use minhook::MinHook;
-use shared::process;
+use shared::windows::process;
 use std::{collections::BTreeMap, sync::RwLock};
 use winapi::ctypes::c_void;
 

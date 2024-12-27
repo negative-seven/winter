@@ -1,7 +1,4 @@
-use crate::{
-    handle::handle_wrapper,
-    process::{self},
-};
+use crate::windows::{handle::handle_wrapper, process};
 use std::{io, mem::MaybeUninit};
 use thiserror::Error;
 use tracing::{debug, instrument, Level};

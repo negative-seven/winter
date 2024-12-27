@@ -1,7 +1,7 @@
 use super::common::get_trampoline;
 use crate::state::{self, STATE};
 use hooks_macros::{hook, hooks};
-use shared::process;
+use shared::windows::process;
 use winapi::{
     ctypes::c_void,
     shared::{ntdef::NULL, windef::HWND},

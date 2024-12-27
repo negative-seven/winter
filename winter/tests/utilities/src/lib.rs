@@ -2,6 +2,7 @@
 #![allow(clippy::missing_panics_doc)]
 
 use anyhow::Result;
+use shared::input::MouseButton;
 use std::{
     collections::BTreeMap,
     ffi::OsString,
@@ -12,7 +13,6 @@ use std::{
     time::Duration,
 };
 use tracing::info;
-use winter::MouseButton;
 
 pub fn init_test() {
     static ONCE: Once = Once::new();

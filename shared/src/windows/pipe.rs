@@ -1,4 +1,4 @@
-use crate::handle::{self, handle_wrapper};
+use crate::windows::handle::{self, handle_wrapper};
 use std::io::{Read, Write};
 use thiserror::Error;
 use winapi::{

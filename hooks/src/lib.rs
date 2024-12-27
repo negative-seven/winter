@@ -4,20 +4,16 @@ mod hooks;
 mod state;
 
 use futures::executor::block_on;
+pub use shared::ipc::message::LogLevel;
 use shared::{
-    communication::{
-        self, ConductorInitialMessage, ConductorMessage, IdleMessage, InitializedMessage, LogLevel,
-        LogMessage, MouseButton,
-    },
-    event::ManualResetEvent,
-    process, thread,
+    input::MouseButton,
+    ipc::{message, Sender},
+    windows::{event::ManualResetEvent, process, thread},
 };
 use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex, time::Duration};
 
-static mut LOG_MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<LogMessage>>> =
-    MaybeUninit::uninit();
-static mut IDLE_MESSAGE_SENDER: MaybeUninit<Mutex<communication::Sender<IdleMessage>>> =
-    MaybeUninit::uninit();
+static mut LOG_MESSAGE_SENDER: MaybeUninit<Mutex<Sender<message::Log>>> = MaybeUninit::uninit();
+static mut IDLE_MESSAGE_SENDER: MaybeUninit<Mutex<Sender<message::Idle>>> = MaybeUninit::uninit();
 
 #[derive(Debug)]
 #[non_exhaustive]
@@ -81,7 +77,7 @@ macro_rules! log {
         futures::executor::block_on(log_message_sender
             .lock()
             .unwrap()
-            .send(&shared::communication::LogMessage {
+            .send(&shared::ipc::message::Log {
                 level: $level,
                 message: format!($($format_args),+),
             }))
@@ -97,9 +93,9 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
     let mut message_receiver;
 
     unsafe {
-        let initial_message = ConductorInitialMessage::deserialize_from_bytes(
-            &std::ptr::read_unaligned(initial_message_pointer.cast()),
-        );
+        let initial_message = message::Initial::deserialize_from_bytes(&std::ptr::read_unaligned(
+            initial_message_pointer.cast(),
+        ));
         process::Process::get_current()
             .free_memory(initial_message_pointer as usize)
             .unwrap();
@@ -131,7 +127,7 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
 
     hooks::initialize();
 
-    block_on(initialized_message_sender.send(&InitializedMessage)).unwrap();
+    block_on(initialized_message_sender.send(&message::Initialized)).unwrap();
 
     log!(
         LogLevel::Debug,
@@ -141,7 +137,7 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
     loop {
         let event_queue = unsafe { EVENT_QUEUE.assume_init_ref() };
         match block_on(message_receiver.receive()).unwrap() {
-            ConductorMessage::Resume => {
+            message::FromConductor::Resume => {
                 for thread in process::Process::get_current()
                     .iter_thread_ids()
                     .unwrap()
@@ -152,19 +148,19 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
                     thread.decrement_suspend_count().unwrap();
                 }
             }
-            ConductorMessage::AdvanceTime(duration) => {
+            message::FromConductor::AdvanceTime(duration) => {
                 event_queue.enqueue(Event::AdvanceTime(duration));
             }
-            ConductorMessage::SetKeyState { id, state } => {
+            message::FromConductor::SetKeyState { id, state } => {
                 event_queue.enqueue(Event::SetKeyState { id, state });
             }
-            ConductorMessage::SetMousePosition { x, y } => {
+            message::FromConductor::SetMousePosition { x, y } => {
                 event_queue.enqueue(Event::SetMousePosition { x, y });
             }
-            ConductorMessage::SetMouseButtonState { button, state } => {
+            message::FromConductor::SetMouseButtonState { button, state } => {
                 event_queue.enqueue(Event::SetMouseButtonState { button, state });
             }
-            ConductorMessage::IdleRequest => {
+            message::FromConductor::IdleRequest => {
                 event_queue.enqueue(Event::Idle);
             }
             message => unimplemented!("handle message {message:?}"),
