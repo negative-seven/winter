@@ -77,7 +77,7 @@ macro_rules! log {
         futures::executor::block_on(log_message_sender
             .lock()
             .unwrap()
-            .send(&shared::ipc::message::Log {
+            .send(shared::ipc::message::Log {
                 level: $level,
                 message: format!($($format_args),+),
             }))
@@ -127,7 +127,7 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
 
     hooks::initialize();
 
-    block_on(initialized_message_sender.send(&message::Initialized)).unwrap();
+    block_on(initialized_message_sender.send(message::Initialized)).unwrap();
 
     log!(
         LogLevel::Debug,

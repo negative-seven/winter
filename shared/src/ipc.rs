@@ -33,7 +33,7 @@ impl<S: Serialize + Debug> Sender<S> {
         })
     }
 
-    pub async fn send(&mut self, message: &S) -> Result<(), SendError> {
+    pub async fn send(&mut self, message: S) -> Result<(), SendError> {
         self.pipe.write_all(&bincode::serialize(&message)?)?;
         self.pipe.flush()?;
         self.send_event.set()?;

@@ -132,14 +132,14 @@ impl Conductor {
 
     pub async fn resume(&mut self) -> Result<(), ResumeError> {
         self.message_sender
-            .send(&ipc::message::FromConductor::Resume)
+            .send(ipc::message::FromConductor::Resume)
             .await?;
         Ok(())
     }
 
     pub async fn set_key_state(&mut self, id: u8, state: bool) -> Result<(), SetKeyStateError> {
         self.message_sender
-            .send(&ipc::message::FromConductor::SetKeyState { id, state })
+            .send(ipc::message::FromConductor::SetKeyState { id, state })
             .await?;
         Ok(())
     }
@@ -150,7 +150,7 @@ impl Conductor {
         y: u16,
     ) -> Result<(), SetMousePositionError> {
         self.message_sender
-            .send(&ipc::message::FromConductor::SetMousePosition { x, y })
+            .send(ipc::message::FromConductor::SetMousePosition { x, y })
             .await?;
         Ok(())
     }
@@ -161,14 +161,14 @@ impl Conductor {
         state: bool,
     ) -> Result<(), SetMouseButtonStateError> {
         self.message_sender
-            .send(&ipc::message::FromConductor::SetMouseButtonState { button, state })
+            .send(ipc::message::FromConductor::SetMouseButtonState { button, state })
             .await?;
         Ok(())
     }
 
     pub async fn advance_time(&mut self, time: Duration) -> Result<(), AdvanceTimeError> {
         self.message_sender
-            .send(&ipc::message::FromConductor::AdvanceTime(time))
+            .send(ipc::message::FromConductor::AdvanceTime(time))
             .await?;
         Ok(())
     }
@@ -194,7 +194,7 @@ impl Conductor {
         let state = select! {
             result = async {
                 self.message_sender
-                    .send(&ipc::message::FromConductor::IdleRequest)
+                    .send(ipc::message::FromConductor::IdleRequest)
                     .await?;
                 self.idle_message_receiver.receive().await?;
                 Ok::<_, WaitUntilInactiveError>(())

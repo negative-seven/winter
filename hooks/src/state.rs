@@ -284,7 +284,7 @@ fn poll_events_for_sleep() {
                         .assume_init_ref()
                         .lock()
                         .unwrap()
-                        .send(&message::Idle),
+                        .send(message::Idle),
                 )
                 .unwrap();
             },
