@@ -2,7 +2,7 @@ pub mod message;
 
 use crate::windows::{
     event::{self, ManualResetEvent},
-    handle, pipe,
+    handle, pipe, process,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -144,7 +144,10 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
     }
 }
 
-pub fn new_sender_and_receiver<T>() -> Result<(Sender<T>, Receiver<T>), NewSenderAndReceiverError>
+pub fn new_sender_and_receiver<T>(
+    sender_process: &process::Process,
+    receiver_process: &process::Process,
+) -> Result<(Sender<T>, Receiver<T>), NewSenderAndReceiverError>
 where
     T: Serialize + for<'de> Deserialize<'de> + Debug + Debug,
 {
@@ -153,15 +156,15 @@ where
     let acknowledge_event = ManualResetEvent::new()?;
     Ok((
         Sender {
-            pipe: pipe_writer,
-            send_event: send_event.try_clone()?,
-            acknowledge_event: acknowledge_event.try_clone()?,
+            pipe: pipe_writer.try_clone_for_process(sender_process)?,
+            send_event: send_event.try_clone_for_process(sender_process)?,
+            acknowledge_event: acknowledge_event.try_clone_for_process(sender_process)?,
             _phantom_data: PhantomData,
         },
         Receiver {
-            pipe: pipe_reader,
-            send_event: send_event.try_clone()?,
-            acknowledge_event: acknowledge_event.try_clone()?,
+            pipe: pipe_reader.try_clone_for_process(receiver_process)?,
+            send_event: send_event.try_clone_for_process(receiver_process)?,
+            acknowledge_event: acknowledge_event.try_clone_for_process(receiver_process)?,
             _phantom_data: PhantomData,
         },
     ))

@@ -22,7 +22,7 @@ impl ManualResetEvent {
             #[expect(clippy::cast_possible_truncation)]
             nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: NULL,
-            bInheritHandle: TRUE,
+            bInheritHandle: FALSE,
         };
 
         unsafe {

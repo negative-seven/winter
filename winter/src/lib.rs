@@ -42,16 +42,6 @@ impl Conductor {
     {
         let (stdout_pipe_writer, stdout_pipe_reader) = pipe::new()?;
 
-        // sender/receiver pairs must be created before the process, so that their
-        // handles can be inherited
-        let (conductor_sender, hooks_receiver) = ipc::new_sender_and_receiver()?;
-        let (hooks_initialized_sender, mut conductor_initialized_receiver) =
-            ipc::new_sender_and_receiver::<ipc::message::Initialized>()?;
-        let (hooks_log_sender, mut conductor_log_receiver) =
-            ipc::new_sender_and_receiver::<ipc::message::Log>()?;
-        let (hooks_idle_sender, conductor_idle_receiver) =
-            ipc::new_sender_and_receiver::<ipc::message::Idle>()?;
-
         let subprocess = process::Process::create(
             executable_path.as_ref(),
             command_line_string,
@@ -74,6 +64,16 @@ impl Conductor {
             "hooks32.dll"
         };
         subprocess.inject_dll(hooks_library).await?;
+
+        let process = process::Process::get_current();
+        let (conductor_sender, hooks_receiver) =
+            ipc::new_sender_and_receiver(&process, &subprocess)?;
+        let (hooks_initialized_sender, mut conductor_initialized_receiver) =
+            ipc::new_sender_and_receiver(&subprocess, &process)?;
+        let (hooks_log_sender, mut conductor_log_receiver) =
+            ipc::new_sender_and_receiver(&subprocess, &process)?;
+        let (hooks_idle_sender, conductor_idle_receiver) =
+            ipc::new_sender_and_receiver(&subprocess, &process)?;
 
         let initial_message = ipc::message::Initial {
             main_thread_id: main_thread.get_id()?,

@@ -9,7 +9,7 @@ use std::{
 use thiserror::Error;
 use winapi::{
     ctypes::c_void,
-    shared::{minwindef::TRUE, ntdef::NULL, winerror::ERROR_IO_PENDING},
+    shared::{minwindef::FALSE, ntdef::NULL, winerror::ERROR_IO_PENDING},
     um::{
         handleapi::{CloseHandle, DuplicateHandle},
         winbase::{RegisterWaitForSingleObject, UnregisterWait, INFINITE},
@@ -38,16 +38,20 @@ impl Handle {
     }
 
     pub fn try_clone(&self) -> Result<Self, CloneError> {
+        self.try_clone_for_process(&process::Process::get_current())
+    }
+
+    pub fn try_clone_for_process(&self, process: &process::Process) -> Result<Self, CloneError> {
         unsafe {
             let current_process = process::Process::get_current();
             let mut duplicated_handle = NULL;
             if DuplicateHandle(
                 current_process.raw_handle(),
                 self.as_raw(),
-                current_process.raw_handle(),
+                process.raw_handle(),
                 &mut duplicated_handle,
                 0,
-                TRUE,
+                FALSE,
                 DUPLICATE_SAME_ACCESS,
             ) == 0
             {
@@ -184,8 +188,17 @@ macro_rules! handle_wrapper {
             }
 
             pub fn try_clone(&self) -> Result<Self, crate::windows::handle::CloneError> {
+                self.try_clone_for_process(&crate::windows::process::Process::get_current())
+            }
+
+            pub fn try_clone_for_process(
+                &self,
+                process: &crate::windows::process::Process,
+            ) -> Result<Self, crate::windows::handle::CloneError> {
                 Ok(Self {
-                    handle: std::mem::ManuallyDrop::new(self.handle.try_clone()?),
+                    handle: std::mem::ManuallyDrop::new(
+                        self.handle.try_clone_for_process(process)?,
+                    ),
                 })
             }
         }
