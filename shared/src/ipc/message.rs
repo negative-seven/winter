@@ -1,8 +1,12 @@
 use super::{Receiver, Sender};
-use crate::input::MouseButton;
+use crate::{
+    input::MouseButton,
+    windows::{event, pipe},
+};
 use serde::{Deserialize, Serialize};
-use std::{io::Read, time::Duration};
+use std::{io::Read, marker::PhantomData, time::Duration};
 use thiserror::Error;
+use winapi::ctypes::c_void;
 
 pub trait Message: Sized {
     unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError>;
@@ -19,7 +23,6 @@ pub struct Initial {
     pub main_thread_id: u32,
     pub initialized_message_sender: Sender<Initialized>,
     pub log_message_sender: Sender<Log>,
-    pub idle_message_sender: Sender<Idle>,
     pub message_receiver: Receiver<FromConductor>,
 }
 
@@ -29,7 +32,6 @@ impl Message for Initial {
             &self.main_thread_id.to_ne_bytes() as &[u8],
             &self.initialized_message_sender.serialize_to_bytes(),
             &self.log_message_sender.serialize_to_bytes(),
-            &self.idle_message_sender.serialize_to_bytes(),
             &self.message_receiver.serialize_to_bytes(),
         ]
         .concat();
@@ -43,9 +45,6 @@ impl Message for Initial {
             self.log_message_sender.pipe.leak_handle();
             self.log_message_sender.send_event.leak_handle();
             self.log_message_sender.acknowledge_event.leak_handle();
-            self.idle_message_sender.pipe.leak_handle();
-            self.idle_message_sender.send_event.leak_handle();
-            self.idle_message_sender.acknowledge_event.leak_handle();
             self.message_receiver.pipe.leak_handle();
             self.message_receiver.send_event.leak_handle();
             self.message_receiver.acknowledge_event.leak_handle();
@@ -64,7 +63,6 @@ impl Message for Initial {
         let serialized_main_thread_id = read::<4>(&mut reader)?;
         let serialized_initialized_message_sender = read::<12>(&mut reader)?;
         let serialized_log_message_sender = read::<12>(&mut reader)?;
-        let serialized_idle_message_sender = read::<12>(&mut reader)?;
         let serialized_message_receiver = read::<12>(&mut reader)?;
         unsafe {
             Ok(Self {
@@ -73,14 +71,13 @@ impl Message for Initial {
                     serialized_initialized_message_sender,
                 ),
                 log_message_sender: Sender::deserialize_from_bytes(serialized_log_message_sender),
-                idle_message_sender: Sender::deserialize_from_bytes(serialized_idle_message_sender),
                 message_receiver: Receiver::deserialize_from_bytes(serialized_message_receiver),
             })
         }
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum FromConductor {
     Resume,
@@ -88,16 +85,86 @@ pub enum FromConductor {
     SetKeyState { id: u8, state: bool },
     SetMousePosition { x: u16, y: u16 },
     SetMouseButtonState { button: MouseButton, state: bool },
-    IdleRequest,
+    IdleRequest { response_sender: Sender<Idle> },
+}
+
+// TODO: cleaner implementation
+#[derive(Debug, Serialize, Deserialize)]
+enum FromConductorSerializable {
+    Resume,
+    AdvanceTime(Duration),
+    SetKeyState { id: u8, state: bool },
+    SetMousePosition { x: u16, y: u16 },
+    SetMouseButtonState { button: MouseButton, state: bool },
+    IdleRequest { response_sender: (u32, u32, u32) },
 }
 
 impl Message for FromConductor {
     unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError> {
-        Ok(bincode::serialize(&self)?)
+        Ok(bincode::serialize(&match self {
+            FromConductor::Resume => FromConductorSerializable::Resume,
+            FromConductor::AdvanceTime(duration) => {
+                FromConductorSerializable::AdvanceTime(duration)
+            }
+            FromConductor::SetKeyState { id, state } => {
+                FromConductorSerializable::SetKeyState { id, state }
+            }
+            FromConductor::SetMousePosition { x, y } => {
+                FromConductorSerializable::SetMousePosition { x, y }
+            }
+            FromConductor::SetMouseButtonState { button, state } => {
+                FromConductorSerializable::SetMouseButtonState { button, state }
+            }
+            FromConductor::IdleRequest { response_sender } => {
+                FromConductorSerializable::IdleRequest {
+                    response_sender: unsafe {
+                        (
+                            response_sender.pipe.leak_handle() as u32,
+                            response_sender.send_event.leak_handle() as u32,
+                            response_sender.acknowledge_event.leak_handle() as u32,
+                        )
+                    },
+                }
+            }
+        })?)
     }
 
     unsafe fn deserialize_from(reader: impl Read) -> Result<Self, DeserializeError> {
-        Ok(bincode::deserialize_from(reader)?)
+        Ok(
+            match bincode::deserialize_from::<_, FromConductorSerializable>(reader)? {
+                FromConductorSerializable::Resume => FromConductor::Resume,
+                FromConductorSerializable::AdvanceTime(duration) => {
+                    FromConductor::AdvanceTime(duration)
+                }
+                FromConductorSerializable::SetKeyState { id, state } => {
+                    FromConductor::SetKeyState { id, state }
+                }
+                FromConductorSerializable::SetMousePosition { x, y } => {
+                    FromConductor::SetMousePosition { x, y }
+                }
+                FromConductorSerializable::SetMouseButtonState { button, state } => {
+                    FromConductor::SetMouseButtonState { button, state }
+                }
+                FromConductorSerializable::IdleRequest { response_sender } => {
+                    FromConductor::IdleRequest {
+                        response_sender: unsafe {
+                            Sender {
+                                pipe: pipe::Writer::from_raw_handle(
+                                    response_sender.0 as *mut c_void,
+                                ),
+                                send_event: event::ManualResetEvent::from_raw_handle(
+                                    response_sender.1 as *mut c_void,
+                                ),
+                                acknowledge_event: event::ManualResetEvent::from_raw_handle(
+                                    response_sender.2 as *mut c_void,
+                                ),
+                                _phantom_data: PhantomData,
+                            }
+                        },
+                    }
+                }
+            },
+        )
     }
 }
 

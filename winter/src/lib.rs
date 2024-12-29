@@ -4,7 +4,7 @@ use anyhow::Result;
 use saved_state::SavedState;
 use shared::{
     input::MouseButton,
-    ipc::{self, message::Message, Receiver, Sender},
+    ipc::{self, message::Message, Sender},
     windows::{
         event, pipe,
         process::{self, CheckIs64BitError},
@@ -26,7 +26,6 @@ pub struct Conductor {
     stdout_callback: Option<Box<dyn Fn(&[u8]) + Send>>,
     stdout_pipe_reader: pipe::Reader,
     message_sender: Sender<ipc::message::FromConductor>,
-    idle_message_receiver: Receiver<ipc::message::Idle>,
     receive_log_messages_task: Option<tokio::task::JoinHandle<()>>,
     saved_state: Option<SavedState>,
 }
@@ -72,14 +71,11 @@ impl Conductor {
             ipc::new_sender_and_receiver(&subprocess, &process)?;
         let (hooks_log_sender, mut conductor_log_receiver) =
             ipc::new_sender_and_receiver(&subprocess, &process)?;
-        let (hooks_idle_sender, conductor_idle_receiver) =
-            ipc::new_sender_and_receiver(&subprocess, &process)?;
 
         let initial_message = ipc::message::Initial {
             main_thread_id: main_thread.get_id()?,
             initialized_message_sender: hooks_initialized_sender,
             log_message_sender: hooks_log_sender,
-            idle_message_sender: hooks_idle_sender,
             message_receiver: hooks_receiver,
         };
         let initial_message_serialized = unsafe { initial_message.serialize() }.unwrap();
@@ -132,7 +128,6 @@ impl Conductor {
             },
             stdout_pipe_reader,
             message_sender: conductor_sender,
-            idle_message_receiver: conductor_idle_receiver,
             receive_log_messages_task: Some(receive_log_messages_task),
             saved_state: None,
         })
@@ -201,10 +196,12 @@ impl Conductor {
         let mut stdout = Vec::new();
         let state = select! {
             result = async {
+                let (response_sender, mut response_receiver) =
+                    ipc::new_sender_and_receiver(&self.process, &process::Process::get_current())?;
                 self.message_sender
-                    .send(ipc::message::FromConductor::IdleRequest)
+                    .send(ipc::message::FromConductor::IdleRequest { response_sender })
                     .await?;
-                self.idle_message_receiver.receive().await?;
+                response_receiver.receive().await?;
                 Ok::<_, WaitUntilInactiveError>(())
             } => {
                 result?;
@@ -317,6 +314,7 @@ pub enum LoadStateError {
 #[error("error occurred while waiting for the subprocess to become inactive")]
 pub enum WaitUntilInactiveError {
     ProcessJoin(#[from] process::JoinError),
+    NewSenderAndReceiver(#[from] ipc::NewSenderAndReceiverError),
     MessageSend(#[from] ipc::SendError),
     MessageReceive(#[from] ipc::ReceiveError),
     Os(#[from] io::Error),

@@ -16,16 +16,26 @@ use shared::{
 use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex, time::Duration};
 
 static mut LOG_MESSAGE_SENDER: MaybeUninit<Mutex<Sender<message::Log>>> = MaybeUninit::uninit();
-static mut IDLE_MESSAGE_SENDER: MaybeUninit<Mutex<Sender<message::Idle>>> = MaybeUninit::uninit();
 
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Event {
     AdvanceTime(Duration),
-    SetKeyState { id: u8, state: bool },
-    SetMousePosition { x: u16, y: u16 },
-    SetMouseButtonState { button: MouseButton, state: bool },
-    Idle,
+    SetKeyState {
+        id: u8,
+        state: bool,
+    },
+    SetMousePosition {
+        x: u16,
+        y: u16,
+    },
+    SetMouseButtonState {
+        button: MouseButton,
+        state: bool,
+    },
+    Idle {
+        response_sender: Sender<message::Idle>,
+    },
 }
 
 struct EventQueueInner {
@@ -113,7 +123,6 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
             .unwrap();
         initialized_message_sender = initial_message.initialized_message_sender;
         LOG_MESSAGE_SENDER = MaybeUninit::new(Mutex::new(initial_message.log_message_sender));
-        IDLE_MESSAGE_SENDER = MaybeUninit::new(Mutex::new(initial_message.idle_message_sender));
         message_receiver = initial_message.message_receiver;
         state::MAIN_THREAD_ID.write(initial_message.main_thread_id);
         EVENT_QUEUE.write(EventQueue::new());
@@ -172,8 +181,8 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
             message::FromConductor::SetMouseButtonState { button, state } => {
                 event_queue.enqueue(Event::SetMouseButtonState { button, state });
             }
-            message::FromConductor::IdleRequest => {
-                event_queue.enqueue(Event::Idle);
+            message::FromConductor::IdleRequest { response_sender } => {
+                event_queue.enqueue(Event::Idle { response_sender });
             }
             message => unimplemented!("handle message {message:?}"),
         }

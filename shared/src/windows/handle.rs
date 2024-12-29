@@ -170,14 +170,15 @@ macro_rules! handle_wrapper {
                 unsafe { self.handle.as_raw() }
             }
 
-            pub unsafe fn from_raw_handle(handle: *mut winapi::ctypes::c_void) -> Self {
+            #[must_use]
+            pub unsafe fn from_handle(handle: crate::windows::handle::Handle) -> Self {
                 Self {
-                    handle: unsafe {
-                        std::mem::ManuallyDrop::new(crate::windows::handle::Handle::from_raw(
-                            handle,
-                        ))
-                    },
+                    handle: std::mem::ManuallyDrop::new(handle),
                 }
+            }
+
+            pub unsafe fn from_raw_handle(handle: *mut winapi::ctypes::c_void) -> Self {
+                unsafe { Self::from_handle(crate::windows::handle::Handle::from_raw(handle)) }
             }
 
             #[expect(clippy::must_use_candidate)]

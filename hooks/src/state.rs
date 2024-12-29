@@ -1,4 +1,4 @@
-use crate::{hooks, log, Event, LogLevel, MouseButton, EVENT_QUEUE, IDLE_MESSAGE_SENDER};
+use crate::{hooks, log, Event, LogLevel, MouseButton, EVENT_QUEUE};
 use futures::executor::block_on;
 use shared::ipc::message;
 use std::{
@@ -278,16 +278,9 @@ fn poll_events_for_sleep() {
                     },
                 );
             }
-            Event::Idle => unsafe {
-                block_on(
-                    IDLE_MESSAGE_SENDER
-                        .assume_init_ref()
-                        .lock()
-                        .unwrap()
-                        .send(message::Idle),
-                )
-                .unwrap();
-            },
+            Event::Idle {
+                mut response_sender,
+            } => block_on(response_sender.send(message::Idle)).unwrap(),
             #[expect(unreachable_patterns)] // Event is #[non_exhaustive]
             event => unimplemented!("event {event:?}"),
         }
