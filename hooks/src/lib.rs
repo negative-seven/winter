@@ -7,7 +7,10 @@ use futures::executor::block_on;
 pub use shared::ipc::message::LogLevel;
 use shared::{
     input::MouseButton,
-    ipc::{message, Sender},
+    ipc::{
+        message::{self, Message},
+        Sender,
+    },
     windows::{event::ManualResetEvent, process, thread},
 };
 use std::{collections::VecDeque, mem::MaybeUninit, sync::Mutex, time::Duration};
@@ -93,9 +96,18 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
     let mut message_receiver;
 
     unsafe {
-        let initial_message = message::Initial::deserialize_from_bytes(&std::ptr::read_unaligned(
-            initial_message_pointer.cast(),
-        ));
+        let initial_message_len = u32::from_ne_bytes(
+            (std::slice::from_raw_parts(initial_message_pointer, size_of::<u32>()))
+                .try_into()
+                .unwrap(),
+        )
+        .try_into()
+        .unwrap();
+        let initial_message = message::Initial::deserialize(std::slice::from_raw_parts(
+            initial_message_pointer.byte_add(size_of::<u32>()),
+            initial_message_len,
+        ))
+        .unwrap();
         process::Process::get_current()
             .free_memory(initial_message_pointer as usize)
             .unwrap();

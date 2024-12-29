@@ -4,7 +4,7 @@ use anyhow::Result;
 use saved_state::SavedState;
 use shared::{
     input::MouseButton,
-    ipc::{self, Receiver, Sender},
+    ipc::{self, message::Message, Receiver, Sender},
     windows::{
         event, pipe,
         process::{self, CheckIs64BitError},
@@ -82,16 +82,24 @@ impl Conductor {
             idle_message_sender: hooks_idle_sender,
             message_receiver: hooks_receiver,
         };
-        let initial_message_serialized = initial_message.serialize_to_bytes();
-        std::mem::forget(initial_message); // prevent senders and receivers from being dropped
+        let initial_message_serialized = unsafe { initial_message.serialize() }.unwrap();
         let initial_message_pointer = subprocess.allocate_memory(
-            initial_message_serialized.len(),
+            size_of::<u32>() + initial_message_serialized.len(),
             process::MemoryPermissions {
                 rwe: process::MemoryPermissionsRwe::ReadWrite,
                 is_guard: false,
             },
         )?;
-        subprocess.write(initial_message_pointer, &initial_message_serialized)?;
+        subprocess.write(
+            initial_message_pointer,
+            &u32::try_from(initial_message_serialized.len())
+                .unwrap()
+                .to_ne_bytes(),
+        )?;
+        subprocess.write(
+            initial_message_pointer + size_of::<u32>(),
+            &initial_message_serialized,
+        )?;
         subprocess.create_thread(
             subprocess.get_export_address(hooks_library, "initialize")?,
             false,

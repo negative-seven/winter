@@ -1,7 +1,18 @@
 use super::{Receiver, Sender};
 use crate::input::MouseButton;
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{io::Read, time::Duration};
+use thiserror::Error;
+
+pub trait Message: Sized {
+    unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError>;
+
+    unsafe fn deserialize_from(reader: impl Read) -> Result<Self, DeserializeError>;
+
+    unsafe fn deserialize(bytes: &[u8]) -> Result<Self, DeserializeError> {
+        Ok(unsafe { Self::deserialize_from(std::io::Cursor::new(bytes))? })
+    }
+}
 
 #[derive(Debug)]
 pub struct Initial {
@@ -12,44 +23,59 @@ pub struct Initial {
     pub message_receiver: Receiver<FromConductor>,
 }
 
-impl Initial {
-    #[must_use]
-    pub fn serialize_to_bytes(&self) -> Vec<u8> {
-        let mut bytes = vec![];
-        bytes.extend(self.main_thread_id.to_ne_bytes());
-        bytes.extend(self.initialized_message_sender.serialize_to_bytes());
-        bytes.extend(self.log_message_sender.serialize_to_bytes());
-        bytes.extend(self.idle_message_sender.serialize_to_bytes());
-        bytes.extend(self.message_receiver.serialize_to_bytes());
-        bytes
+impl Message for Initial {
+    unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError> {
+        let bytes = [
+            &self.main_thread_id.to_ne_bytes() as &[u8],
+            &self.initialized_message_sender.serialize_to_bytes(),
+            &self.log_message_sender.serialize_to_bytes(),
+            &self.idle_message_sender.serialize_to_bytes(),
+            &self.message_receiver.serialize_to_bytes(),
+        ]
+        .concat();
+
+        unsafe {
+            self.initialized_message_sender.pipe.leak_handle();
+            self.initialized_message_sender.send_event.leak_handle();
+            self.initialized_message_sender
+                .acknowledge_event
+                .leak_handle();
+            self.log_message_sender.pipe.leak_handle();
+            self.log_message_sender.send_event.leak_handle();
+            self.log_message_sender.acknowledge_event.leak_handle();
+            self.idle_message_sender.pipe.leak_handle();
+            self.idle_message_sender.send_event.leak_handle();
+            self.idle_message_sender.acknowledge_event.leak_handle();
+            self.message_receiver.pipe.leak_handle();
+            self.message_receiver.send_event.leak_handle();
+            self.message_receiver.acknowledge_event.leak_handle();
+        }
+
+        Ok(bytes)
     }
 
-    /// # Panics
-    /// Panics if `bytes` does not have the expected length.
-    #[must_use]
-    pub unsafe fn deserialize_from_bytes(bytes: &[u8; 4 + 12 + 12 + 12 + 12]) -> Self {
-        let (serialized_main_thread_id, bytes) = bytes.split_at(4);
-        let (serialized_initialized_message_sender, bytes) = bytes.split_at(12);
-        let (serialized_log_message_sender, bytes) = bytes.split_at(12);
-        let (serialized_idle_message_sender, bytes) = bytes.split_at(12);
-        let (serialized_message_receiver, bytes) = bytes.split_at(12);
-        assert!(bytes.is_empty());
+    unsafe fn deserialize_from(mut reader: impl Read) -> Result<Self, DeserializeError> {
+        fn read<const N: usize>(mut reader: impl Read) -> Result<[u8; N], DeserializeError> {
+            let mut array = [0; N];
+            reader.read_exact(&mut array)?;
+            Ok(array)
+        }
+
+        let serialized_main_thread_id = read::<4>(&mut reader)?;
+        let serialized_initialized_message_sender = read::<12>(&mut reader)?;
+        let serialized_log_message_sender = read::<12>(&mut reader)?;
+        let serialized_idle_message_sender = read::<12>(&mut reader)?;
+        let serialized_message_receiver = read::<12>(&mut reader)?;
         unsafe {
-            Self {
-                main_thread_id: u32::from_ne_bytes(serialized_main_thread_id.try_into().unwrap()),
+            Ok(Self {
+                main_thread_id: u32::from_ne_bytes(serialized_main_thread_id),
                 initialized_message_sender: Sender::deserialize_from_bytes(
-                    serialized_initialized_message_sender.try_into().unwrap(),
+                    serialized_initialized_message_sender,
                 ),
-                log_message_sender: Sender::deserialize_from_bytes(
-                    serialized_log_message_sender.try_into().unwrap(),
-                ),
-                idle_message_sender: Sender::deserialize_from_bytes(
-                    serialized_idle_message_sender.try_into().unwrap(),
-                ),
-                message_receiver: Receiver::deserialize_from_bytes(
-                    serialized_message_receiver.try_into().unwrap(),
-                ),
-            }
+                log_message_sender: Sender::deserialize_from_bytes(serialized_log_message_sender),
+                idle_message_sender: Sender::deserialize_from_bytes(serialized_idle_message_sender),
+                message_receiver: Receiver::deserialize_from_bytes(serialized_message_receiver),
+            })
         }
     }
 }
@@ -65,13 +91,43 @@ pub enum FromConductor {
     IdleRequest,
 }
 
+impl Message for FromConductor {
+    unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError> {
+        Ok(bincode::serialize(&self)?)
+    }
+
+    unsafe fn deserialize_from(reader: impl Read) -> Result<Self, DeserializeError> {
+        Ok(bincode::deserialize_from(reader)?)
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Initialized;
+
+impl Message for Initialized {
+    unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError> {
+        Ok(bincode::serialize(&self)?)
+    }
+
+    unsafe fn deserialize_from(reader: impl Read) -> Result<Self, DeserializeError> {
+        Ok(bincode::deserialize_from(reader)?)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Log {
     pub level: LogLevel,
     pub message: String,
+}
+
+impl Message for Log {
+    unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError> {
+        Ok(bincode::serialize(&self)?)
+    }
+
+    unsafe fn deserialize_from(reader: impl Read) -> Result<Self, DeserializeError> {
+        Ok(bincode::deserialize_from(reader)?)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -85,3 +141,26 @@ pub enum LogLevel {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Idle;
+
+impl Message for Idle {
+    unsafe fn serialize(self) -> Result<Vec<u8>, SerializeError> {
+        Ok(bincode::serialize(&self)?)
+    }
+
+    unsafe fn deserialize_from(reader: impl Read) -> Result<Self, DeserializeError> {
+        Ok(bincode::deserialize_from(reader)?)
+    }
+}
+
+#[derive(Debug, Error)]
+#[error("failed to serialize message")]
+pub enum SerializeError {
+    Bincode(#[from] Box<bincode::ErrorKind>),
+}
+
+#[derive(Debug, Error)]
+#[error("failed to deserialize message")]
+pub enum DeserializeError {
+    Bincode(#[from] Box<bincode::ErrorKind>),
+    Io(#[from] std::io::Error),
+}

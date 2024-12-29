@@ -30,7 +30,7 @@ impl Handle {
         self.0
     }
 
-    #[must_use]
+    #[expect(clippy::must_use_candidate)]
     pub unsafe fn leak(self) -> *mut c_void {
         let raw = self.0;
         std::mem::forget(self);
@@ -180,7 +180,7 @@ macro_rules! handle_wrapper {
                 }
             }
 
-            #[must_use]
+            #[expect(clippy::must_use_candidate)]
             pub unsafe fn leak_handle(mut self) -> *mut winapi::ctypes::c_void {
                 let raw_handle = unsafe { std::mem::ManuallyDrop::take(&mut self.handle).leak() };
                 std::mem::forget(self);

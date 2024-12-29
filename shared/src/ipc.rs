@@ -4,7 +4,7 @@ use crate::windows::{
     event::{self, ManualResetEvent},
     handle, pipe, process,
 };
-use serde::{Deserialize, Serialize};
+use message::Message;
 use std::{
     fmt::Debug,
     io::{self, Write},
@@ -15,7 +15,7 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct Sender<S>
 where
-    S: Serialize + Debug,
+    S: Message + Debug,
 {
     pipe: pipe::Writer,
     send_event: ManualResetEvent,
@@ -23,7 +23,7 @@ where
     _phantom_data: PhantomData<S>, // circumvents "parameter is never used" error
 }
 
-impl<S: Serialize + Debug> Sender<S> {
+impl<S: Message + Debug> Sender<S> {
     pub fn try_clone(&self) -> Result<Self, SenderCloneError> {
         Ok(Self {
             pipe: self.pipe.try_clone()?,
@@ -34,7 +34,7 @@ impl<S: Serialize + Debug> Sender<S> {
     }
 
     pub async fn send(&mut self, message: S) -> Result<(), SendError> {
-        self.pipe.write_all(&bincode::serialize(&message)?)?;
+        self.pipe.write_all(&unsafe { message.serialize() }?)?;
         self.pipe.flush()?;
         self.send_event.set()?;
         self.acknowledge_event.wait().await?;
@@ -81,7 +81,7 @@ impl<S: Serialize + Debug> Sender<S> {
 #[derive(Debug)]
 pub struct Receiver<R>
 where
-    R: for<'de> Deserialize<'de> + Debug,
+    R: Message + Debug,
 {
     pipe: pipe::Reader,
     send_event: ManualResetEvent,
@@ -89,13 +89,13 @@ where
     _phantom_data: PhantomData<R>, // circumvents "parameter is never used" error
 }
 
-impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
+impl<R: Message + Debug> Receiver<R> {
     pub fn peek(&mut self) -> Result<Option<R>, ReceiveError> {
         if !self.send_event.get()? {
             return Ok(None);
         }
         self.send_event.reset()?;
-        let received = bincode::deserialize_from(&mut self.pipe)?;
+        let received = unsafe { R::deserialize_from(&mut self.pipe) }?;
         self.acknowledge_event.set()?;
         Ok(Some(received))
     }
@@ -103,7 +103,7 @@ impl<R: for<'de> Deserialize<'de> + Debug> Receiver<R> {
     pub async fn receive(&mut self) -> Result<R, ReceiveError> {
         self.send_event.wait().await?;
         self.send_event.reset()?;
-        let received = bincode::deserialize_from(&mut self.pipe)?;
+        let received = unsafe { R::deserialize_from(&mut self.pipe) }?;
         self.acknowledge_event.set()?;
         Ok(received)
     }
@@ -149,7 +149,7 @@ pub fn new_sender_and_receiver<T>(
     receiver_process: &process::Process,
 ) -> Result<(Sender<T>, Receiver<T>), NewSenderAndReceiverError>
 where
-    T: Serialize + for<'de> Deserialize<'de> + Debug + Debug,
+    T: Message + Debug,
 {
     let (pipe_writer, pipe_reader) = pipe::new()?;
     let send_event = ManualResetEvent::new()?;
@@ -181,8 +181,8 @@ pub enum NewSenderAndReceiverError {
 #[derive(Debug, Error)]
 #[error("failed to send message")]
 pub enum SendError {
+    Serialize(#[from] message::SerializeError),
     EventWait(#[from] event::WaitError),
-    Bincode(#[from] bincode::Error),
     EventSet(#[from] event::SetError),
     EventReset(#[from] event::ResetError),
     Os(#[from] io::Error),
@@ -191,7 +191,7 @@ pub enum SendError {
 #[derive(Debug, Error)]
 #[error("failed to receive message")]
 pub enum ReceiveError {
-    Bincode(#[from] bincode::Error),
+    Deserialize(#[from] message::DeserializeError),
     EventGet(#[from] event::GetError),
     EventWait(#[from] event::WaitError),
     EventSet(#[from] event::SetError),
