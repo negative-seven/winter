@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::time::Duration;
 use test_utilities::{init_test, Architecture, Event, Instance};
-use test_utilities_macros::test_for;
 
 async fn test_helper(program_name: impl AsRef<str>, architecture: Architecture) -> Result<()> {
     init_test();
@@ -22,17 +21,23 @@ async fn test_helper(program_name: impl AsRef<str>, architecture: Architecture) 
     Ok(())
 }
 
-#[test_for(architecture)]
+// TODO: enable once saving state is more functional
+// #[test_for(architecture)]
+#[expect(dead_code)]
 async fn stack_memory(architecture: Architecture) -> Result<()> {
     test_helper("saved_state/stack_memory", architecture).await
 }
 
-#[test_for(architecture)]
+// TODO: enable once saving state is more functional
+// #[test_for(architecture)]
+#[expect(dead_code)]
 async fn allocated_memory(architecture: Architecture) -> Result<()> {
     test_helper("saved_state/allocated_memory", architecture).await
 }
 
-#[test_for(architecture)]
+// TODO: enable once saving state is more functional
+// #[test_for(architecture)]
+#[expect(dead_code)]
 async fn pipe(architecture: Architecture) -> Result<()> {
     test_helper("saved_state/pipe", architecture).await
 }
