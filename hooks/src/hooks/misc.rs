@@ -1,4 +1,3 @@
-use super::get_trampoline;
 use crate::state::{self, State, STATE};
 use hooks_macros::{hook, hooks};
 use ntapi::ntpsapi::{NtSetInformationThread, ThreadHideFromDebugger, THREADINFOCLASS};
@@ -64,11 +63,7 @@ unsafe extern "system" fn WaitForSingleObject(
             WAIT_TIMEOUT
         }
     } else {
-        let trampoline = get_trampoline!(
-            WaitForSingleObject,
-            unsafe extern "system" fn(*mut c_void, u32) -> u32
-        );
-        unsafe { trampoline(object, timeout_in_milliseconds) }
+        unsafe { get_self_trampoline()(object, timeout_in_milliseconds) }
     }
 }
 
@@ -87,10 +82,6 @@ unsafe extern "system" fn NtSetInformationThread(
     if information_class == ThreadHideFromDebugger {
         STATUS_SUCCESS
     } else {
-        let trampoline = get_trampoline!(
-            NtSetInformationThread,
-            unsafe extern "system" fn(HANDLE, THREADINFOCLASS, *mut c_void, u32) -> i32
-        );
-        unsafe { trampoline(thread, information_class, information, information_length) }
+        unsafe { get_self_trampoline()(thread, information_class, information, information_length) }
     }
 }

@@ -61,6 +61,11 @@ pub fn hook(
                     f = #function_name;
                 }
 
+                fn get_self_trampoline() -> #function_type
+                {
+                    crate::hooks::get_trampoline!(#function_name, #function_type)
+                }
+
                 REPLACEMENT_FUNCTION as *const winapi::ctypes::c_void
             },
         );

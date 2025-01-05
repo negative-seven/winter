@@ -245,19 +245,8 @@ unsafe extern "system" fn SetWaitableTimer(
     completion_routine_argument: *mut c_void,
     resume: i32,
 ) -> i32 {
-    let trampoline = get_trampoline!(
-        SetWaitableTimer,
-        unsafe extern "system" fn(
-            *mut c_void,
-            *const LARGE_INTEGER,
-            i32,
-            Option<unsafe extern "system" fn(*mut c_void, u32, u32)>,
-            *mut c_void,
-            i32,
-        ) -> i32
-    );
     let result = unsafe {
-        trampoline(
+        get_self_trampoline()(
             timer,
             due_time,
             period,
@@ -282,20 +271,8 @@ unsafe extern "system" fn SetWaitableTimerEx(
     wake_context: *mut REASON_CONTEXT,
     tolerable_delay: u32,
 ) -> i32 {
-    let trampoline = get_trampoline!(
-        SetWaitableTimerEx,
-        unsafe extern "system" fn(
-            *mut c_void,
-            *const LARGE_INTEGER,
-            i32,
-            Option<unsafe extern "system" fn(*mut c_void, u32, u32)>,
-            *mut c_void,
-            *mut REASON_CONTEXT,
-            u32,
-        ) -> i32
-    );
     let result = unsafe {
-        trampoline(
+        get_self_trampoline()(
             timer,
             due_time,
             period,
