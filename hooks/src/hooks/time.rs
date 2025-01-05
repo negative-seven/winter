@@ -1,4 +1,4 @@
-use super::common::get_trampoline;
+use super::get_trampoline;
 use crate::state::{self, State, WaitableTimer, STATE};
 use hooks_macros::{hook, hooks};
 use std::{

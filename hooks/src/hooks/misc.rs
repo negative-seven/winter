@@ -1,4 +1,4 @@
-use super::common::get_trampoline;
+use super::get_trampoline;
 use crate::state::{self, State, STATE};
 use hooks_macros::{hook, hooks};
 use ntapi::ntpsapi::{NtSetInformationThread, ThreadHideFromDebugger, THREADINFOCLASS};
