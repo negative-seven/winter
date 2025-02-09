@@ -74,12 +74,16 @@ impl Thread {
     pub fn get_context(&self) -> Result<Context, GetContextError> {
         fn get_normal_context(thread: &Thread) -> Result<CONTEXT, GetContextError> {
             unsafe {
-                let mut context = MaybeUninit::<CONTEXT>::zeroed().assume_init();
-                context.ContextFlags = CONTEXT_ALL;
-                if GetThreadContext(thread.handle.as_raw(), &mut context) == 0 {
+                // https://github.com/retep998/winapi-rs/issues/945
+                #[repr(C, align(16))]
+                struct AlignedContext(CONTEXT);
+
+                let mut context = MaybeUninit::<AlignedContext>::zeroed().assume_init();
+                context.0.ContextFlags = CONTEXT_ALL;
+                if GetThreadContext(thread.handle.as_raw(), &mut context.0) == 0 {
                     return Err(io::Error::last_os_error().into());
                 }
-                Ok(context)
+                Ok(context.0)
             }
         }
 
