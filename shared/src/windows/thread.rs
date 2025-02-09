@@ -1,13 +1,12 @@
 use crate::windows::{handle::handle_wrapper, process};
 use std::{io, mem::MaybeUninit};
 use thiserror::Error;
-use tracing::{debug, instrument, Level};
 use winapi::{
     shared::minwindef::FALSE,
     um::{
         processthreadsapi::{
-            GetExitCodeThread, GetProcessIdOfThread, GetThreadContext, GetThreadId, OpenThread,
-            ResumeThread, SetThreadContext, SuspendThread,
+            GetCurrentThread, GetExitCodeThread, GetProcessIdOfThread, GetThreadContext,
+            GetThreadId, OpenThread, ResumeThread, SetThreadContext, SuspendThread,
         },
         synchapi::WaitForSingleObject,
         winbase::{Wow64GetThreadContext, Wow64SetThreadContext, INFINITE, WAIT_FAILED},
@@ -18,7 +17,6 @@ use winapi::{
 handle_wrapper!(Thread);
 
 impl Thread {
-    #[instrument(ret(level = Level::DEBUG), err)]
     pub fn from_id(id: u32) -> Result<Self, FromIdError> {
         let handle = unsafe { OpenThread(THREAD_ALL_ACCESS, FALSE, id) };
         if handle.is_null() {
@@ -28,7 +26,6 @@ impl Thread {
         unsafe { Ok(Self::from_raw_handle(handle)) }
     }
 
-    #[instrument(ret(level = Level::DEBUG), err)]
     pub fn get_id(&self) -> Result<u32, GetIdError> {
         let id = unsafe { GetThreadId(self.handle.as_raw()) };
         if id == 0 {
@@ -37,7 +34,6 @@ impl Thread {
         Ok(id)
     }
 
-    #[instrument(ret(level = Level::DEBUG), err)]
     pub fn get_process_id(&self) -> Result<u32, GetProcessIdError> {
         let id = unsafe { GetProcessIdOfThread(self.handle.as_raw()) };
         if id == 0 {
@@ -46,7 +42,6 @@ impl Thread {
         Ok(id)
     }
 
-    #[instrument(err)]
     pub fn increment_suspend_count(&self) -> Result<(), ChangeSuspendCountError> {
         if unsafe { SuspendThread(self.handle.as_raw()) } == 0xffff_ffff {
             return Err(io::Error::last_os_error().into());
@@ -54,7 +49,6 @@ impl Thread {
         Ok(())
     }
 
-    #[instrument(err)]
     pub fn decrement_suspend_count(&self) -> Result<(), ChangeSuspendCountError> {
         if unsafe { ResumeThread(self.handle.as_raw()) } == 0xffff_ffff {
             return Err(io::Error::last_os_error().into());
@@ -62,7 +56,6 @@ impl Thread {
         Ok(())
     }
 
-    #[instrument(err)]
     pub async fn join(&self) -> Result<u32, JoinError> {
         unsafe {
             if WaitForSingleObject(self.handle.as_raw(), INFINITE) == WAIT_FAILED {
@@ -86,8 +79,6 @@ impl Thread {
                 if GetThreadContext(thread.handle.as_raw(), &mut context) == 0 {
                     return Err(io::Error::last_os_error().into());
                 }
-                #[cfg(target_pointer_width = "64")]
-                debug!("got context with rip {:#x}", context.Rip);
                 Ok(context)
             }
         }
@@ -127,8 +118,6 @@ impl Thread {
     pub fn set_context(&self, context: &Context) -> Result<(), SetContextError> {
         fn set_normal_context(thread: &Thread, context: &CONTEXT) -> Result<(), SetContextError> {
             unsafe {
-                #[cfg(target_pointer_width = "64")]
-                debug!("setting context with rip {:#x}", context.Rip);
                 if SetThreadContext(thread.handle.as_raw(), context) == 0 {
                     return Err(io::Error::last_os_error().into());
                 }

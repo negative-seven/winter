@@ -11,7 +11,6 @@ use std::{
     path::Path,
 };
 use thiserror::Error;
-use tracing::{debug, instrument, Level};
 use winapi::{
     ctypes::c_void,
     shared::{
@@ -64,15 +63,6 @@ impl Process {
         unsafe { Ok(Self::from_raw_handle(handle)) }
     }
 
-    #[instrument(
-        ret,
-        err,
-        skip(executable_path, command_line_string),
-        fields(
-            executable_path = executable_path.as_ref().display().to_string(),
-            command_line_string = command_line_string.as_ref().to_string_lossy().into_owned(),
-        ),
-    )]
     pub fn create(
         executable_path: impl AsRef<Path>,
         command_line_string: impl AsRef<OsStr>,
@@ -247,7 +237,6 @@ impl Process {
         Ok(ThreadIdIterator::new(self.get_id()?)?)
     }
 
-    #[instrument(ret(level = Level::DEBUG), err)]
     pub fn allocate_memory(
         &self,
         size: usize,
@@ -291,7 +280,6 @@ impl Process {
         Ok(pointer)
     }
 
-    #[instrument(ret(level = Level::DEBUG), err)]
     pub fn free_memory(&self, address: usize) -> Result<(), FreeMemoryError> {
         unsafe {
             if VirtualFreeEx(self.handle.as_raw(), address as *mut c_void, 0, MEM_RELEASE) == 0 {
@@ -323,11 +311,6 @@ impl Process {
         Ok(MemoryPermissions::from_winapi_constant(previous_constant))
     }
 
-    #[instrument(
-        err,
-        skip(address),
-        fields(address = %format!("0x{:x}", address))
-    )]
     pub unsafe fn read<T: Copy>(&self, address: usize) -> Result<T, ReadMemoryError> {
         use std::alloc::{alloc, dealloc, Layout};
 
@@ -351,11 +334,6 @@ impl Process {
         }
     }
 
-    #[instrument(
-        err,
-        skip(address),
-        fields(address = %format!("0x{:x}", address))
-    )]
     pub fn read_to_vec(&self, address: usize, size: usize) -> Result<Vec<u8>, ReadMemoryError> {
         let mut data = vec![0; size];
         unsafe {
@@ -403,12 +381,6 @@ impl Process {
         Ok(string)
     }
 
-    #[instrument(
-        ret(level = Level::DEBUG),
-        err,
-        skip(address, data),
-        fields(address = %format!("0x{:x}", address), data_len = data.len())
-    )]
     pub fn write(&self, address: usize, data: &[u8]) -> Result<(), WriteMemoryError> {
         unsafe {
             if WriteProcessMemory(
@@ -426,12 +398,6 @@ impl Process {
         Ok(())
     }
 
-    #[instrument(
-        ret,
-        err,
-        skip(start_address),
-        fields(address = %format!("0x{:x}", start_address))
-    )]
     pub fn create_thread(
         &self,
         start_address: usize,
@@ -460,12 +426,6 @@ impl Process {
         Ok(unsafe { Thread::from_raw_handle(thread_handle) })
     }
 
-    #[instrument(
-        ret(level = Level::DEBUG),
-        err,
-        skip(name),
-        fields(name = name.as_ref().to_string())
-    )]
     pub fn get_module_address(
         &self,
         name: impl AsRef<str>,
@@ -485,15 +445,6 @@ impl Process {
         Err(ModuleNotFoundError.into())
     }
 
-    #[instrument(
-        ret(level = Level::DEBUG),
-        err,
-        skip(module_name, export_name),
-        fields(
-            module_name = module_name.as_ref().to_string(),
-            export_name = export_name.as_ref().to_string(),
-        )
-    )]
     pub fn get_export_address(
         &self,
         module_name: impl AsRef<str>,
@@ -533,10 +484,8 @@ impl Process {
         let module_name = module_name.as_ref();
         let export_name = export_name.as_ref();
 
-        debug!("get module address in target process");
         let module_address = self.get_module_address(module_name)?;
 
-        debug!("read dos header from 0x{module_address:x} and verify magic");
         let dos_header = unsafe { self.read::<IMAGE_DOS_HEADER>(module_address) }?;
         if dos_header.e_magic != 0x5a4d {
             return Err(InvalidModuleHeadersError.into());
@@ -544,13 +493,11 @@ impl Process {
 
         #[expect(clippy::cast_sign_loss)]
         let pe_header_address = module_address + dos_header.e_lfanew as usize;
-        debug!("verify signature of pe header at 0x{pe_header_address:x}");
         if self.read_to_vec(pe_header_address, 4)? != [0x50, 0x45, 0x0, 0x0] {
             return Err(InvalidModuleHeadersError.into());
         }
 
         let optional_header_address = pe_header_address + 4 + size_of::<IMAGE_FILE_HEADER>();
-        debug!("read optional header from 0x{optional_header_address:x} and verify magic",);
         let optional_header_magic = self.read_to_vec(optional_header_address, 2)?;
         let optional_header = match (optional_header_magic[0], optional_header_magic[1]) {
             (0xb, 0x1) => OptionalHeader::Header32(unsafe {
@@ -562,7 +509,6 @@ impl Process {
             _ => return Err(InvalidModuleHeadersError.into()),
         };
 
-        debug!("get export directory table");
         let export_directory_table_address = module_address
             + optional_header
                 .export_table_address()
@@ -570,7 +516,6 @@ impl Process {
         let export_directory_table =
             unsafe { self.read::<IMAGE_EXPORT_DIRECTORY>(export_directory_table_address) }?;
 
-        debug!("attempt to find export with matching name");
         for index in 0..export_directory_table.NumberOfNames as usize {
             let export_name_pointer = module_address
                 + self.read_u32(
@@ -591,10 +536,9 @@ impl Process {
                 return Ok(module_address + export_offset);
             }
         }
-        return Err(ExportNotFoundError.into());
+        Err(ExportNotFoundError.into())
     }
 
-    #[instrument]
     pub fn get_memory_region(&self, address: usize) -> Result<MemoryRegion, GetMemoryRegionError> {
         unsafe {
             let mut winapi_region = MaybeUninit::zeroed().assume_init();
@@ -624,12 +568,10 @@ impl Process {
         }
     }
 
-    #[instrument]
     pub async fn inject_dll(&self, library_path: &str) -> Result<(), InjectDllError> {
         let library_path_c_string =
             CString::new(library_path).map_err(LibraryPathContainsNulError)?;
 
-        debug!("write no-op function");
         let no_op_function_pointer = self.allocate_memory(
             1,
             MemoryPermissions {
@@ -639,12 +581,10 @@ impl Process {
         )?;
         self.write(no_op_function_pointer, &[0xc3])?; // opcode c3 is ret in both x86 and x64
 
-        debug!("run dummy thread to provoke loading of kernel32.dll");
         self.create_thread(no_op_function_pointer, false, None)?
             .join()
             .await?;
 
-        debug!("write injected dll path");
         let injected_dll_path_pointer = self.allocate_memory(
             library_path_c_string.to_bytes_with_nul().len(),
             MemoryPermissions {
@@ -657,7 +597,6 @@ impl Process {
             library_path_c_string.as_bytes_with_nul(),
         )?;
 
-        debug!("write dll loading function");
         let load_library_a_pointer = self.get_export_address("kernel32.dll", "LoadLibraryA")?;
         let get_last_error_pointer = self.get_export_address("kernel32.dll", "GetLastError")?;
         let load_dll_function = {
@@ -716,14 +655,13 @@ impl Process {
         )?;
         self.write(load_dll_function_pointer, &load_dll_function)?;
 
-        debug!("run dll loading thread");
         match self
             .create_thread(load_dll_function_pointer, false, None)?
             .join()
             .await?
         {
             0 => Ok(()),
-            error_code => return Err(LoadLibraryThreadError { error_code }.into()),
+            error_code => Err(LoadLibraryThreadError { error_code }.into()),
         }
     }
 }
@@ -930,7 +868,6 @@ struct ModuleEntry32Iterator {
 }
 
 impl ModuleEntry32Iterator {
-    #[instrument(ret(level = Level::DEBUG), err)]
     pub(in crate::windows::process) fn new(
         process_id: u32,
     ) -> Result<Self, NewModuleEntry32IteratorError> {
