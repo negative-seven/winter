@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::time::Duration;
 use test_utilities::{init_test, Architecture, Event, Instance};
+use test_utilities_macros::test_for;
 
 async fn test_helper(program_name: impl AsRef<str>, architecture: Architecture) -> Result<()> {
     init_test();
@@ -40,4 +41,18 @@ async fn allocated_memory(architecture: Architecture) -> Result<()> {
 #[expect(dead_code)]
 async fn pipe(architecture: Architecture) -> Result<()> {
     test_helper("saved_state/pipe", architecture).await
+}
+
+// TODO: enable once saving state is more functional
+// #[test_for(architecture)]
+#[expect(dead_code)]
+async fn event(architecture: Architecture) -> Result<()> {
+    test_helper("saved_state/event", architecture).await
+}
+
+// TODO: enable once saving state is more functional
+// #[test_for(architecture)]
+#[expect(dead_code)]
+async fn mutex(architecture: Architecture) -> Result<()> {
+    test_helper("saved_state/mutex", architecture).await
 }
