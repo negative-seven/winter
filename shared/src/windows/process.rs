@@ -1,10 +1,11 @@
+use super::module::{self, Module};
 use crate::windows::{
     handle::{self, handle_wrapper, Handle},
     pipe,
     thread::Thread,
 };
 use std::{
-    ffi::{CStr, CString, NulError, OsStr},
+    ffi::{CString, NulError, OsStr},
     io,
     mem::MaybeUninit,
     os::windows::ffi::OsStrExt,
@@ -14,9 +15,8 @@ use thiserror::Error;
 use winapi::{
     ctypes::c_void,
     shared::{
-        minwindef::{FALSE, TRUE},
+        minwindef::{FALSE, HMODULE, TRUE},
         ntdef::NULL,
-        winerror::ERROR_BAD_LENGTH,
     },
     um::{
         handleapi::INVALID_HANDLE_VALUE,
@@ -29,10 +29,9 @@ use winapi::{
             CreateProcessW, CreateRemoteThread, GetCurrentProcess, GetExitCodeProcess,
             GetProcessId, OpenProcess, PROCESS_INFORMATION, STARTUPINFOW,
         },
+        psapi::{EnumProcessModulesEx, LIST_MODULES_ALL},
         tlhelp32::{
-            CreateToolhelp32Snapshot, Module32First, Module32Next, Thread32First, Thread32Next,
-            MODULEENTRY32, TH32CS_SNAPMODULE, TH32CS_SNAPMODULE32, TH32CS_SNAPTHREAD,
-            THREADENTRY32,
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
         },
         winbase::{CreateJobObjectA, CREATE_SUSPENDED, STARTF_USESTDHANDLES},
         winnt::{
@@ -237,6 +236,38 @@ impl Process {
         Ok(ThreadIdIterator::new(self.get_id()?)?)
     }
 
+    pub fn get_modules(&self) -> Result<Vec<Module>, GetModulesError> {
+        unsafe {
+            let mut modules = Vec::<MaybeUninit<HMODULE>>::new();
+            let mut items_needed = 0;
+            loop {
+                if EnumProcessModulesEx(
+                    self.raw_handle(),
+                    modules.as_mut_ptr().cast(),
+                    (modules.len() * size_of::<HMODULE>()).try_into().unwrap(),
+                    &mut items_needed,
+                    LIST_MODULES_ALL,
+                ) == 0
+                {
+                    return Err(io::Error::last_os_error().into());
+                }
+                items_needed /= u32::try_from(size_of::<HMODULE>()).unwrap();
+
+                if modules.len() >= items_needed as usize {
+                    break;
+                }
+
+                modules.resize(items_needed as usize, MaybeUninit::uninit());
+            }
+
+            Ok(modules
+                .iter()
+                .take(items_needed as usize)
+                .map(|m| Module::from_raw_handle(self, m.assume_init()))
+                .collect())
+        }
+    }
+
     pub fn allocate_memory(
         &self,
         size: usize,
@@ -426,20 +457,11 @@ impl Process {
         Ok(unsafe { Thread::from_raw_handle(thread_handle) })
     }
 
-    pub fn get_module_address(
-        &self,
-        name: impl AsRef<str>,
-    ) -> Result<usize, GetModuleAddressError> {
-        let target_module_name = name.as_ref();
-        unsafe {
-            for entry in ModuleEntry32Iterator::new(self.get_id()?)? {
-                let module_name = CStr::from_ptr(entry.szModule.as_ptr()).to_str();
-                if let Ok(module_name) = module_name {
-                    // if the module name is not valid utf-8, it will not match
-                    if module_name.to_lowercase() == target_module_name.to_lowercase() {
-                        return Ok(entry.modBaseAddr as usize);
-                    }
-                };
+    pub fn get_module_address(&self, name: &OsStr) -> Result<usize, GetModuleAddressError> {
+        for module in self.get_modules()? {
+            let module_name = module.get_name()?;
+            if module_name.to_ascii_lowercase() == name.to_ascii_lowercase() {
+                return Ok(module.get_base_address() as usize);
             }
         }
         Err(ModuleNotFoundError.into())
@@ -447,7 +469,7 @@ impl Process {
 
     pub fn get_export_address(
         &self,
-        module_name: impl AsRef<str>,
+        module_name: &OsStr,
         export_name: impl AsRef<str>,
     ) -> Result<usize, GetExportAddressError> {
         enum OptionalHeader {
@@ -481,7 +503,6 @@ impl Process {
             }
         }
 
-        let module_name = module_name.as_ref();
         let export_name = export_name.as_ref();
 
         let module_address = self.get_module_address(module_name)?;
@@ -597,8 +618,10 @@ impl Process {
             library_path_c_string.as_bytes_with_nul(),
         )?;
 
-        let load_library_a_pointer = self.get_export_address("kernel32.dll", "LoadLibraryA")?;
-        let get_last_error_pointer = self.get_export_address("kernel32.dll", "GetLastError")?;
+        let load_library_a_pointer =
+            self.get_export_address(OsStr::new("kernel32.dll"), "LoadLibraryA")?;
+        let get_last_error_pointer =
+            self.get_export_address(OsStr::new("kernel32.dll"), "GetLastError")?;
         let load_dll_function = {
             if self.is_64_bit()? {
                 let mut function = vec![
@@ -861,78 +884,6 @@ impl Iterator for ThreadIdIterator {
     }
 }
 
-#[derive(Debug)]
-struct ModuleEntry32Iterator {
-    snapshot_handle: Handle,
-    called_module_32_first: bool,
-}
-
-impl ModuleEntry32Iterator {
-    pub(in crate::windows::process) fn new(
-        process_id: u32,
-    ) -> Result<Self, NewModuleEntry32IteratorError> {
-        let mut snapshot_handle;
-        loop {
-            snapshot_handle = unsafe {
-                CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, process_id)
-            };
-            if snapshot_handle != INVALID_HANDLE_VALUE {
-                break;
-            }
-
-            // retry on ERROR_BAD_LENGTH (see: https://learn.microsoft.com/en-us/windows/win32/api/TlHelp32/nf-tlhelp32-createtoolhelp32snapshot)
-            let error = io::Error::last_os_error();
-            #[expect(clippy::cast_sign_loss)]
-            if !error
-                .raw_os_error()
-                .is_some_and(|code| code as u32 == ERROR_BAD_LENGTH)
-            {
-                return Err(error.into());
-            }
-        }
-
-        Ok(ModuleEntry32Iterator {
-            snapshot_handle: unsafe { Handle::from_raw(snapshot_handle) },
-            called_module_32_first: false,
-        })
-    }
-}
-
-impl Iterator for ModuleEntry32Iterator {
-    type Item = MODULEENTRY32;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let mut me32 = MODULEENTRY32 {
-            #[expect(clippy::cast_possible_truncation)]
-            dwSize: size_of::<MODULEENTRY32>() as u32,
-            th32ModuleID: 0,
-            th32ProcessID: 0,
-            GlblcntUsage: 0,
-            ProccntUsage: 0,
-            modBaseAddr: NULL.cast(),
-            modBaseSize: 0,
-            hModule: NULL.cast(),
-            szModule: [0; 256],
-            szExePath: [0; 260],
-        };
-
-        let next_thread_exists = unsafe {
-            if self.called_module_32_first {
-                Module32Next(self.snapshot_handle.as_raw(), &mut me32)
-            } else {
-                self.called_module_32_first = true;
-                Module32First(self.snapshot_handle.as_raw(), &mut me32)
-            }
-        } != 0;
-
-        if next_thread_exists {
-            Some(me32)
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 #[error("failed to create process")]
 pub enum CreateError {
@@ -971,6 +922,10 @@ pub enum IterThreadIdsError {
 }
 
 #[derive(Debug, Error)]
+#[error("failed to get process modules")]
+pub struct GetModulesError(#[from] io::Error);
+
+#[derive(Debug, Error)]
 #[error("failed to allocate memory")]
 pub struct AllocateMemoryError(#[from] io::Error);
 
@@ -997,8 +952,8 @@ pub struct CreateThreadError(#[from] io::Error);
 #[derive(Debug, Error)]
 #[error("failed to get module address")]
 pub enum GetModuleAddressError {
-    GetId(#[from] GetIdError),
-    NewModuleEntry32Iterator(#[from] NewModuleEntry32IteratorError),
+    ProcessGetModules(#[from] GetModulesError),
+    ModuleGetName(#[from] module::GetNameError),
     ModuleNotFound(#[from] ModuleNotFoundError),
 }
 
@@ -1055,7 +1010,3 @@ pub struct LibraryPathContainsNulError(#[from] NulError);
 #[derive(Debug, Error)]
 #[error("failed to create thread id iterator")]
 pub struct NewThreadIdIteratorError(#[from] io::Error);
-
-#[derive(Debug, Error)]
-#[error("failed to create MODULEENTRY32 iterator")]
-pub struct NewModuleEntry32IteratorError(#[from] io::Error);

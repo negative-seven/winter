@@ -97,7 +97,7 @@ impl Conductor {
             &initial_message_serialized,
         )?;
         subprocess.create_thread(
-            subprocess.get_export_address(hooks_library, "initialize")?,
+            subprocess.get_export_address(OsStr::new(hooks_library), "initialize")?,
             false,
             Some(initial_message_pointer as _),
         )?;

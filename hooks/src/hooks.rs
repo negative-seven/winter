@@ -5,7 +5,7 @@ mod window;
 
 use minhook::MinHook;
 use shared::windows::process;
-use std::{collections::BTreeMap, sync::RwLock};
+use std::{collections::BTreeMap, ffi::OsStr, sync::RwLock};
 use winapi::ctypes::c_void;
 
 pub(crate) static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTreeMap::new());
@@ -43,7 +43,7 @@ pub(crate) fn initialize() {
 
     for (module_name, function_name, hook) in hooks {
         fn hook_function(
-            module_name: &str,
+            module_name: &OsStr,
             function_name: &str,
             hook: *const c_void,
         ) -> Result<(), Box<dyn std::error::Error>> {
@@ -60,6 +60,6 @@ pub(crate) fn initialize() {
             }
             Ok(())
         }
-        let _unused_result = hook_function(module_name, function_name, hook);
+        let _unused_result = hook_function(OsStr::new(module_name), function_name, hook);
     }
 }

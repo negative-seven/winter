@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::time::Duration;
 use test_utilities::{init_test, Architecture, Event, Instance};
-use test_utilities_macros::test_for;
 
 async fn test_helper(program_name: impl AsRef<str>, architecture: Architecture) -> Result<()> {
     init_test();

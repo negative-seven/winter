@@ -5,8 +5,8 @@ use winapi::{
     shared::minwindef::FALSE,
     um::{
         processthreadsapi::{
-            GetCurrentThread, GetExitCodeThread, GetProcessIdOfThread, GetThreadContext,
-            GetThreadId, OpenThread, ResumeThread, SetThreadContext, SuspendThread,
+            GetExitCodeThread, GetProcessIdOfThread, GetThreadContext, GetThreadId, OpenThread,
+            ResumeThread, SetThreadContext, SuspendThread,
         },
         synchapi::WaitForSingleObject,
         winbase::{Wow64GetThreadContext, Wow64SetThreadContext, INFINITE, WAIT_FAILED},
