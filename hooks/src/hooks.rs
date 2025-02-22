@@ -1,11 +1,20 @@
 mod input;
+mod library;
 mod misc;
 mod time;
 mod window;
 
+use crate::log;
 use minhook::MinHook;
-use shared::windows::process;
-use std::{collections::BTreeMap, ffi::OsStr, sync::RwLock};
+use shared::{
+    ipc::message::LogLevel,
+    windows::{module, process},
+};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ffi::{OsStr, OsString},
+    sync::{LazyLock, Mutex, RwLock},
+};
 use winapi::ctypes::c_void;
 
 pub(crate) static TRAMPOLINES: RwLock<BTreeMap<String, usize>> = RwLock::new(BTreeMap::new());
@@ -38,10 +47,44 @@ fn set_trampoline(name: impl AsRef<str>, pointer: *const c_void) {
         .insert(name.as_ref().to_string(), pointer as usize);
 }
 
-pub(crate) fn initialize() {
-    let hooks = [input::HOOKS, time::HOOKS, window::HOOKS, misc::HOOKS].concat();
+static HOOKS: LazyLock<BTreeMap<OsString, Vec<(&str, usize)>>> = LazyLock::new(|| {
+    let mut map = BTreeMap::<_, Vec<_>>::new();
+    for (module_name, function_name, hook) in [
+        library::HOOKS,
+        input::HOOKS,
+        time::HOOKS,
+        window::HOOKS,
+        misc::HOOKS,
+    ]
+    .concat()
+    {
+        map.entry(OsString::from(module_name))
+            .or_default()
+            .push((function_name, hook as usize));
+    }
+    map
+});
 
-    for (module_name, function_name, hook) in hooks {
+pub(crate) fn initialize() {
+    let process = process::Process::get_current();
+    for module in process.get_modules().unwrap() {
+        apply_to_module(&module);
+    }
+}
+
+static HOOKED_MODULE_ADDRESSES: Mutex<BTreeSet<usize>> = Mutex::new(BTreeSet::new());
+pub(crate) fn apply_to_module(module: &module::Module) {
+    if HOOKED_MODULE_ADDRESSES
+        .lock()
+        .unwrap()
+        .contains(&(module.get_base_address() as usize))
+    {
+        return;
+    }
+
+    let module_name = module.get_name().unwrap().to_ascii_lowercase();
+    log!(LogLevel::Debug, "applying hooks to {:?}", module_name);
+    for &(function_name, hook) in HOOKS.get(&module_name).unwrap_or(&vec![]) {
         fn hook_function(
             module_name: &OsStr,
             function_name: &str,
@@ -60,6 +103,18 @@ pub(crate) fn initialize() {
             }
             Ok(())
         }
-        let _unused_result = hook_function(OsStr::new(module_name), function_name, hook);
+
+        let result = hook_function(&module_name, function_name, hook as *const c_void);
+        if let Err(error) = result {
+            log!(
+                LogLevel::Debug,
+                "failed to hook: {function_name}; error: {error}"
+            );
+        }
     }
+
+    HOOKED_MODULE_ADDRESSES
+        .lock()
+        .unwrap()
+        .insert(module.get_base_address() as usize);
 }

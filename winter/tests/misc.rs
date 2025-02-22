@@ -25,3 +25,22 @@ async fn NtSetInformationThread(architecture: Architecture) -> Result<()> {
     assert_eq!(stdout, "start\r\nbreakpoint\r\nend\r\n");
     Ok(())
 }
+
+#[test_for(architecture)]
+async fn library_loading_0(architecture: Architecture) -> Result<()> {
+    library_loading("hooks/misc/library_loading_0", architecture).await
+}
+
+#[test_for(architecture)]
+async fn library_loading_1(architecture: Architecture) -> Result<()> {
+    library_loading("hooks/misc/library_loading_1", architecture).await
+}
+
+async fn library_loading(program_name: &str, architecture: Architecture) -> Result<()> {
+    init_test();
+    let stdout = Instance::new(program_name, architecture)
+        .stdout_from_utf8_lossy()
+        .await?;
+    assert_eq!(stdout, "0\r\n0\r\n0\r\n");
+    Ok(())
+}

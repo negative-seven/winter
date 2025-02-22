@@ -102,8 +102,6 @@ impl Conductor {
             Some(initial_message_pointer as _),
         )?;
 
-        conductor_initialized_receiver.receive().await?;
-
         let receive_log_messages_task = {
             tokio::spawn(async move {
                 loop {
@@ -119,6 +117,8 @@ impl Conductor {
                 }
             })
         };
+
+        conductor_initialized_receiver.receive().await?;
 
         Ok(Self {
             process: subprocess,

@@ -162,7 +162,7 @@ impl<'a> Instance<'a> {
         if let winter::InactiveState::Terminated { exit_code } =
             conductor.wait_until_inactive().await?
         {
-            assert!(exit_code == 0);
+            assert_eq!(exit_code, 0);
         } else {
             panic!("the final checked inactive state is not the terminated state")
         }
