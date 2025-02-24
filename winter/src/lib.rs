@@ -101,7 +101,8 @@ impl Conductor {
                 subprocess
                     .get_module(OsStr::new(hooks_library))?
                     .unwrap()
-                    .get_export_address("initialize")?,
+                    .get_export_address("initialize")?
+                    .unwrap(),
                 false,
                 Some(initial_message_pointer.cast()),
             )?;

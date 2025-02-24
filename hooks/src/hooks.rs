@@ -94,7 +94,8 @@ pub(crate) fn apply_to_module(module: &module::Module) {
             let function_address = process
                 .get_module(module_name)?
                 .ok_or("module not found")?
-                .get_export_address(function_name)?;
+                .get_export_address(function_name)?
+                .ok_or("function not found in module")?;
             unsafe {
                 let original_function =
                     MinHook::create_hook(function_address, hook as *mut std::ffi::c_void).unwrap();

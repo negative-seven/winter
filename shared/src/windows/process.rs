@@ -497,6 +497,7 @@ impl Process {
         }
     }
 
+    #[expect(clippy::too_many_lines)] // TODO
     pub async fn inject_dll(&self, library_path: &str) -> Result<(), InjectDllError> {
         let library_path_c_string =
             CString::new(library_path).map_err(LibraryPathContainsNulError)?;
@@ -533,8 +534,12 @@ impl Process {
         let kernel32_module = self
             .get_module(OsStr::new("kernel32.dll"))?
             .expect("kernel32.dll module not found");
-        let load_library_a_pointer = kernel32_module.get_export_address("LoadLibraryA")?;
-        let get_last_error_pointer = kernel32_module.get_export_address("GetLastError")?;
+        let load_library_a_pointer = kernel32_module
+            .get_export_address("LoadLibraryA")?
+            .expect("LoadLibraryA function not found in kernel32.dll");
+        let get_last_error_pointer = kernel32_module
+            .get_export_address("GetLastError")?
+            .expect("GetLastError function not found in kernel32.dll");
         let load_dll_function = {
             if self.is_64_bit()? {
                 let mut function = vec![

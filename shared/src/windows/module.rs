@@ -63,7 +63,7 @@ impl<'p> Module<'p> {
     pub fn get_export_address(
         &self,
         export_name: &str,
-    ) -> Result<*mut c_void, GetExportAddressError> {
+    ) -> Result<Option<*mut c_void>, GetExportAddressError> {
         enum OptionalHeader {
             Header32(IMAGE_OPTIONAL_HEADER32),
             Header64(IMAGE_OPTIONAL_HEADER64),
@@ -169,10 +169,12 @@ impl<'p> Module<'p> {
                             )
                             .cast(),
                     )? as usize;
-                    return Ok((self.get_base_address().byte_add(export_offset)).cast());
+                    return Ok(Some(
+                        (self.get_base_address().byte_add(export_offset)).cast(),
+                    ));
                 }
             }
-            Err(ExportNotFoundError.into())
+            Ok(None)
         }
     }
 }
@@ -186,14 +188,9 @@ pub struct GetNameError(#[from] io::Error);
 pub enum GetExportAddressError {
     ReadMemory(#[from] process::ReadMemoryError),
     InvalidModuleHeaders(#[from] InvalidModuleHeadersError),
-    ExportNotFound(#[from] ExportNotFoundError),
     Os(#[from] io::Error),
 }
 
 #[derive(Debug, Error)]
 #[error("invalid headers in module")]
 pub struct InvalidModuleHeadersError;
-
-#[derive(Debug, Error)]
-#[error("export not found in module")]
-pub struct ExportNotFoundError;
