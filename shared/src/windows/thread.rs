@@ -1,3 +1,4 @@
+use super::handle;
 use crate::windows::{handle::handle_wrapper, process};
 use std::{io, mem::MaybeUninit};
 use thiserror::Error;
@@ -8,8 +9,7 @@ use winapi::{
             GetExitCodeThread, GetProcessIdOfThread, GetThreadContext, GetThreadId, OpenThread,
             ResumeThread, SetThreadContext, SuspendThread,
         },
-        synchapi::WaitForSingleObject,
-        winbase::{Wow64GetThreadContext, Wow64SetThreadContext, INFINITE, WAIT_FAILED},
+        winbase::{Wow64GetThreadContext, Wow64SetThreadContext},
         winnt::{CONTEXT, CONTEXT_ALL, THREAD_ALL_ACCESS, WOW64_CONTEXT, WOW64_CONTEXT_ALL},
     },
 };
@@ -58,9 +58,7 @@ impl Thread {
 
     pub async fn join(&self) -> Result<u32, JoinError> {
         unsafe {
-            if WaitForSingleObject(self.handle.as_raw(), INFINITE) == WAIT_FAILED {
-                return Err(io::Error::last_os_error().into());
-            }
+            self.handle.wait().await?;
 
             let mut exit_code = 0u32;
             if GetExitCodeThread(self.handle.as_raw(), &mut exit_code) == 0 {
@@ -203,7 +201,10 @@ pub struct ChangeSuspendCountError(#[from] io::Error);
 
 #[derive(Debug, Error)]
 #[error("failed to join thread")]
-pub struct JoinError(#[from] io::Error);
+pub enum JoinError {
+    HandleWait(#[from] handle::WaitError),
+    Os(#[from] io::Error),
+}
 
 #[derive(Debug, Error)]
 #[error("failed to get thread context")]
