@@ -87,20 +87,22 @@ impl Conductor {
             },
         )?;
         subprocess.write(
-            initial_message_pointer,
+            initial_message_pointer.cast(),
             &u32::try_from(initial_message_serialized.len())
                 .unwrap()
                 .to_ne_bytes(),
         )?;
         subprocess.write(
-            initial_message_pointer + size_of::<u32>(),
+            unsafe { initial_message_pointer.byte_add(size_of::<u32>()).cast() },
             &initial_message_serialized,
         )?;
-        subprocess.create_thread(
-            subprocess.get_export_address(OsStr::new(hooks_library), "initialize")?,
-            false,
-            Some(initial_message_pointer as _),
-        )?;
+        unsafe {
+            subprocess.create_thread(
+                subprocess.get_export_address(OsStr::new(hooks_library), "initialize")?,
+                false,
+                Some(initial_message_pointer as _),
+            )?;
+        }
 
         let receive_log_messages_task = {
             tokio::spawn(async move {

@@ -1,7 +1,12 @@
 use super::process::Process;
-use std::{ffi::OsString, io, mem::MaybeUninit, os::windows::ffi::OsStringExt};
+use std::{
+    ffi::{c_void, OsString},
+    io,
+    mem::MaybeUninit,
+    os::windows::ffi::OsStringExt,
+};
 use thiserror::Error;
-use winapi::{ctypes::c_void, shared::minwindef::HMODULE, um::psapi::GetModuleBaseNameW};
+use winapi::{shared::minwindef::HMODULE, um::psapi::GetModuleBaseNameW};
 
 pub struct Module<'p> {
     process: &'p Process,

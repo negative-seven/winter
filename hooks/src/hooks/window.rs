@@ -78,7 +78,7 @@ unsafe fn register_class_ex(information: *const WNDCLASSEXA, unicode_strings: bo
             };
 
             let current_process = process::Process::get_current();
-            let hook_wrapper_pointer = current_process
+            let hook_wrapper_address = current_process
                 .allocate_memory(
                     hook_wrapper.len(),
                     process::MemoryPermissions {
@@ -86,12 +86,13 @@ unsafe fn register_class_ex(information: *const WNDCLASSEXA, unicode_strings: bo
                         is_guard: false,
                     },
                 )
-                .unwrap();
+                .unwrap()
+                .cast();
             current_process
-                .write(hook_wrapper_pointer, &hook_wrapper)
+                .write(hook_wrapper_address, &hook_wrapper)
                 .unwrap();
 
-            unsafe { std::mem::transmute(hook_wrapper_pointer) }
+            unsafe { std::mem::transmute(hook_wrapper_address) }
         });
 
     if unicode_strings {

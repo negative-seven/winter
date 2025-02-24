@@ -93,12 +93,9 @@ pub(crate) fn apply_to_module(module: &module::Module) {
             let process = process::Process::get_current();
             let function_address = process.get_export_address(module_name, function_name)?;
             unsafe {
-                let original_function = MinHook::create_hook(
-                    function_address as *mut std::ffi::c_void,
-                    hook as *mut std::ffi::c_void,
-                )
-                .unwrap();
-                MinHook::enable_hook(function_address as *mut std::ffi::c_void).unwrap();
+                let original_function =
+                    MinHook::create_hook(function_address, hook as *mut std::ffi::c_void).unwrap();
+                MinHook::enable_hook(function_address).unwrap();
                 set_trampoline(function_name, original_function.cast());
             }
             Ok(())

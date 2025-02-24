@@ -5,7 +5,7 @@ use crate::windows::{
     thread::Thread,
 };
 use std::{
-    ffi::{CString, NulError, OsStr},
+    ffi::{c_void, CString, NulError, OsStr},
     io,
     mem::MaybeUninit,
     os::windows::ffi::OsStrExt,
@@ -13,7 +13,6 @@ use std::{
 };
 use thiserror::Error;
 use winapi::{
-    ctypes::c_void,
     shared::{
         minwindef::{FALSE, HMODULE, TRUE},
         ntdef::NULL,
@@ -272,7 +271,7 @@ impl Process {
         &self,
         size: usize,
         permissions: MemoryPermissions,
-    ) -> Result<usize, AllocateMemoryError> {
+    ) -> Result<*mut c_void, AllocateMemoryError> {
         let pointer = unsafe {
             VirtualAllocEx(
                 self.handle.as_raw(),
@@ -281,39 +280,39 @@ impl Process {
                 MEM_COMMIT | MEM_RESERVE,
                 permissions.to_winapi_constant(),
             )
-        } as usize;
-        if pointer == 0 {
+        };
+        if pointer.is_null() {
             return Err(io::Error::last_os_error().into());
         }
 
-        Ok(pointer)
+        Ok(pointer.cast())
     }
 
     pub fn allocate_memory_at(
         &self,
-        address: usize,
+        address: *mut c_void,
         size: usize,
         permissions: MemoryPermissions,
-    ) -> Result<usize, AllocateMemoryError> {
+    ) -> Result<*mut c_void, AllocateMemoryError> {
         let pointer = unsafe {
             VirtualAllocEx(
                 self.handle.as_raw(),
-                address as *mut c_void,
+                address.cast(),
                 size,
                 MEM_COMMIT | MEM_RESERVE,
                 permissions.to_winapi_constant(),
             )
-        } as usize;
-        if pointer == 0 {
+        };
+        if pointer.is_null() {
             return Err(io::Error::last_os_error().into());
         }
 
-        Ok(pointer)
+        Ok(pointer.cast())
     }
 
-    pub fn free_memory(&self, address: usize) -> Result<(), FreeMemoryError> {
+    pub fn free_memory(&self, address: *mut c_void) -> Result<(), FreeMemoryError> {
         unsafe {
-            if VirtualFreeEx(self.handle.as_raw(), address as *mut c_void, 0, MEM_RELEASE) == 0 {
+            if VirtualFreeEx(self.handle.as_raw(), address.cast(), 0, MEM_RELEASE) == 0 {
                 return Err(io::Error::last_os_error().into());
             }
         }
@@ -322,7 +321,7 @@ impl Process {
 
     pub fn set_memory_permissions(
         &self,
-        address: usize,
+        address: *mut c_void,
         size: usize,
         permissions: MemoryPermissions,
     ) -> Result<MemoryPermissions, SetMemoryPermissionsError> {
@@ -330,7 +329,7 @@ impl Process {
         unsafe {
             if VirtualProtectEx(
                 self.handle.as_raw(),
-                address as *mut c_void,
+                address.cast(),
                 size,
                 permissions.to_winapi_constant(),
                 std::ptr::addr_of_mut!(previous_constant),
@@ -342,14 +341,14 @@ impl Process {
         Ok(MemoryPermissions::from_winapi_constant(previous_constant))
     }
 
-    pub unsafe fn read<T: Copy>(&self, address: usize) -> Result<T, ReadMemoryError> {
+    pub unsafe fn read<T: Copy>(&self, address: *const T) -> Result<T, ReadMemoryError> {
         use std::alloc::{alloc, dealloc, Layout};
 
         unsafe {
             let data = alloc(Layout::array::<T>(1).unwrap());
             if ReadProcessMemory(
                 self.handle.as_raw(),
-                address as *mut c_void,
+                address.cast(),
                 data.cast(),
                 size_of::<T>(),
                 NULL.cast(),
@@ -365,12 +364,12 @@ impl Process {
         }
     }
 
-    pub fn read_to_vec(&self, address: usize, size: usize) -> Result<Vec<u8>, ReadMemoryError> {
+    pub fn read_to_vec(&self, address: *const u8, size: usize) -> Result<Vec<u8>, ReadMemoryError> {
         let mut data = vec![0; size];
         unsafe {
             if ReadProcessMemory(
                 self.handle.as_raw(),
-                address as *mut c_void,
+                address.cast(),
                 data.as_mut_ptr().cast(),
                 size,
                 NULL.cast(),
@@ -382,28 +381,32 @@ impl Process {
         Ok(data)
     }
 
-    pub fn read_u8(&self, address: usize) -> Result<u8, ReadMemoryError> {
+    pub fn read_u8(&self, address: *const u8) -> Result<u8, ReadMemoryError> {
         Ok(self.read_to_vec(address, 1)?[0])
     }
 
     #[expect(clippy::missing_panics_doc)]
-    pub fn read_u16(&self, address: usize) -> Result<u16, ReadMemoryError> {
+    pub fn read_u16(&self, address: *const u16) -> Result<u16, ReadMemoryError> {
         Ok(u16::from_le_bytes(
-            <[u8; 2]>::try_from(self.read_to_vec(address, 2)?).unwrap(),
+            <[u8; 2]>::try_from(self.read_to_vec(address.cast(), 2)?).unwrap(),
         ))
     }
 
     #[expect(clippy::missing_panics_doc)]
-    pub fn read_u32(&self, address: usize) -> Result<u32, ReadMemoryError> {
+    pub fn read_u32(&self, address: *const u32) -> Result<u32, ReadMemoryError> {
         Ok(u32::from_le_bytes(
-            <[u8; 4]>::try_from(self.read_to_vec(address, 4)?).unwrap(),
+            <[u8; 4]>::try_from(self.read_to_vec(address.cast(), 4)?).unwrap(),
         ))
     }
 
-    pub fn read_nul_terminated_string(&self, address: usize) -> Result<String, ReadMemoryError> {
+    #[expect(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn read_nul_terminated_string(
+        &self,
+        address: *const u8,
+    ) -> Result<String, ReadMemoryError> {
         let mut string = String::new();
         for index in 0.. {
-            let next_byte = self.read_u8(address + index)?;
+            let next_byte = self.read_u8(unsafe { address.add(index) })?;
             if next_byte == 0 {
                 break;
             }
@@ -412,11 +415,11 @@ impl Process {
         Ok(string)
     }
 
-    pub fn write(&self, address: usize, data: &[u8]) -> Result<(), WriteMemoryError> {
+    pub fn write(&self, address: *mut u8, data: &[u8]) -> Result<(), WriteMemoryError> {
         unsafe {
             if WriteProcessMemory(
                 self.handle.as_raw(),
-                address as *mut c_void,
+                address.cast(),
                 data.as_ptr().cast(),
                 data.len(),
                 NULL.cast(),
@@ -429,9 +432,9 @@ impl Process {
         Ok(())
     }
 
-    pub fn create_thread(
+    pub unsafe fn create_thread(
         &self,
-        start_address: usize,
+        start_address: *mut c_void,
         suspended: bool,
         parameter: Option<*mut c_void>,
     ) -> Result<Thread, CreateThreadError> {
@@ -441,10 +444,10 @@ impl Process {
                 NULL.cast(),
                 0,
                 Some(std::mem::transmute::<
-                    usize,
-                    unsafe extern "system" fn(*mut c_void) -> u32,
+                    *mut c_void,
+                    unsafe extern "system" fn(*mut winapi::ctypes::c_void) -> u32,
                 >(start_address)),
-                parameter.unwrap_or(NULL),
+                parameter.map_or(NULL, <*mut _>::cast),
                 if suspended { CREATE_SUSPENDED } else { 0 },
                 NULL.cast(),
             )
@@ -457,11 +460,11 @@ impl Process {
         Ok(unsafe { Thread::from_raw_handle(thread_handle) })
     }
 
-    pub fn get_module_address(&self, name: &OsStr) -> Result<usize, GetModuleAddressError> {
+    pub fn get_module_address(&self, name: &OsStr) -> Result<*mut c_void, GetModuleAddressError> {
         for module in self.get_modules()? {
             let module_name = module.get_name()?;
             if module_name.to_ascii_lowercase() == name.to_ascii_lowercase() {
-                return Ok(module.get_base_address() as usize);
+                return Ok(module.get_base_address());
             }
         }
         Err(ModuleNotFoundError.into())
@@ -471,7 +474,7 @@ impl Process {
         &self,
         module_name: &OsStr,
         export_name: impl AsRef<str>,
-    ) -> Result<usize, GetExportAddressError> {
+    ) -> Result<*mut c_void, GetExportAddressError> {
         enum OptionalHeader {
             Header32(IMAGE_OPTIONAL_HEADER32),
             Header64(IMAGE_OPTIONAL_HEADER64),
@@ -507,65 +510,87 @@ impl Process {
 
         let module_address = self.get_module_address(module_name)?;
 
-        let dos_header = unsafe { self.read::<IMAGE_DOS_HEADER>(module_address) }?;
-        if dos_header.e_magic != 0x5a4d {
-            return Err(InvalidModuleHeadersError.into());
-        }
+        unsafe {
+            let dos_header_address = module_address.cast::<IMAGE_DOS_HEADER>();
+            let dos_header = self.read(dos_header_address)?;
+            if dos_header.e_magic != 0x5a4d {
+                return Err(InvalidModuleHeadersError.into());
+            }
 
-        #[expect(clippy::cast_sign_loss)]
-        let pe_header_address = module_address + dos_header.e_lfanew as usize;
-        if self.read_to_vec(pe_header_address, 4)? != [0x50, 0x45, 0x0, 0x0] {
-            return Err(InvalidModuleHeadersError.into());
-        }
+            #[expect(clippy::cast_sign_loss)]
+            let pe_header_address = module_address.byte_add(dos_header.e_lfanew as usize).cast();
+            if self.read_to_vec(pe_header_address, 4)? != [0x50, 0x45, 0x0, 0x0] {
+                return Err(InvalidModuleHeadersError.into());
+            }
 
-        let optional_header_address = pe_header_address + 4 + size_of::<IMAGE_FILE_HEADER>();
-        let optional_header_magic = self.read_to_vec(optional_header_address, 2)?;
-        let optional_header = match (optional_header_magic[0], optional_header_magic[1]) {
-            (0xb, 0x1) => OptionalHeader::Header32(unsafe {
-                self.read::<IMAGE_OPTIONAL_HEADER32>(optional_header_address)
-            }?),
-            (0xb, 0x2) => OptionalHeader::Header64(unsafe {
-                self.read::<IMAGE_OPTIONAL_HEADER64>(optional_header_address)
-            }?),
-            _ => return Err(InvalidModuleHeadersError.into()),
-        };
+            let optional_header_address = pe_header_address
+                .byte_add(4 + size_of::<IMAGE_FILE_HEADER>())
+                .cast::<c_void>();
+            let optional_header_magic = self.read_to_vec(optional_header_address.cast(), 2)?;
+            let optional_header = match (optional_header_magic[0], optional_header_magic[1]) {
+                (0xb, 0x1) => OptionalHeader::Header32(
+                    self.read::<IMAGE_OPTIONAL_HEADER32>(optional_header_address.cast())?,
+                ),
+                (0xb, 0x2) => OptionalHeader::Header64(
+                    self.read::<IMAGE_OPTIONAL_HEADER64>(optional_header_address.cast())?,
+                ),
+                _ => return Err(InvalidModuleHeadersError.into()),
+            };
 
-        let export_directory_table_address = module_address
-            + optional_header
-                .export_table_address()
-                .ok_or(InvalidModuleHeadersError)? as usize;
-        let export_directory_table =
-            unsafe { self.read::<IMAGE_EXPORT_DIRECTORY>(export_directory_table_address) }?;
+            let export_directory_table_address = module_address
+                .byte_add(
+                    optional_header
+                        .export_table_address()
+                        .ok_or(InvalidModuleHeadersError)? as usize,
+                )
+                .cast::<IMAGE_EXPORT_DIRECTORY>();
+            let export_directory_table = self.read(export_directory_table_address)?;
 
-        for index in 0..export_directory_table.NumberOfNames as usize {
-            let export_name_pointer = module_address
-                + self.read_u32(
-                    module_address + export_directory_table.AddressOfNames as usize + index * 4,
-                )? as usize;
-            let export_name_at_index = self.read_nul_terminated_string(export_name_pointer)?;
-            if export_name_at_index.to_lowercase() == export_name.to_lowercase() {
-                let export_ordinal = self.read_u16(
-                    module_address
-                        + export_directory_table.AddressOfNameOrdinals as usize
-                        + index * 2,
-                )? as usize;
-                let export_offset = self.read_u32(
-                    module_address
-                        + export_directory_table.AddressOfFunctions as usize
-                        + export_ordinal * 4,
-                )? as usize;
-                return Ok(module_address + export_offset);
+            for index in 0..export_directory_table.NumberOfNames as usize {
+                let export_name_pointer = module_address
+                    .byte_add(
+                        self.read_u32(
+                            module_address
+                                .byte_add(
+                                    export_directory_table.AddressOfNames as usize + index * 4,
+                                )
+                                .cast(),
+                        )? as usize,
+                    )
+                    .cast();
+                let export_name_at_index = self.read_nul_terminated_string(export_name_pointer)?;
+                if export_name_at_index.to_lowercase() == export_name.to_lowercase() {
+                    let export_ordinal = self.read_u16(
+                        module_address
+                            .byte_add(
+                                export_directory_table.AddressOfNameOrdinals as usize + index * 2,
+                            )
+                            .cast(),
+                    )? as usize;
+                    let export_offset = self.read_u32(
+                        module_address
+                            .byte_add(
+                                export_directory_table.AddressOfFunctions as usize
+                                    + export_ordinal * 4,
+                            )
+                            .cast(),
+                    )? as usize;
+                    return Ok(module_address.byte_add(export_offset));
+                }
             }
         }
         Err(ExportNotFoundError.into())
     }
 
-    pub fn get_memory_region(&self, address: usize) -> Result<MemoryRegion, GetMemoryRegionError> {
+    pub fn get_memory_region(
+        &self,
+        address: *mut c_void,
+    ) -> Result<MemoryRegion, GetMemoryRegionError> {
         unsafe {
             let mut winapi_region = MaybeUninit::zeroed().assume_init();
             if VirtualQueryEx(
                 self.handle.as_raw(),
-                address as *const c_void,
+                address.cast(),
                 &mut winapi_region,
                 size_of_val(&winapi_region),
             ) == 0
@@ -574,15 +599,15 @@ impl Process {
             }
             Ok(if winapi_region.State == MEM_FREE {
                 MemoryRegion::Free(FreeMemoryRegion {
-                    address: winapi_region.BaseAddress as usize,
+                    address: winapi_region.BaseAddress.cast(),
                     size: winapi_region.RegionSize,
                 })
             } else {
                 MemoryRegion::Reserved(ReservedMemoryRegion {
-                    address: winapi_region.BaseAddress as usize,
+                    address: winapi_region.BaseAddress.cast(),
                     size: winapi_region.RegionSize,
                     is_committed: winapi_region.State == MEM_COMMIT,
-                    allocation_address: winapi_region.AllocationBase as usize,
+                    allocation_address: winapi_region.AllocationBase.cast(),
                     permissions: MemoryPermissions::from_winapi_constant(winapi_region.Protect),
                 })
             })
@@ -600,19 +625,23 @@ impl Process {
                 is_guard: false,
             },
         )?;
-        self.write(no_op_function_pointer, &[0xc3])?; // opcode c3 is ret in both x86 and x64
+        self.write(no_op_function_pointer.cast(), &[0xc3])?; // opcode c3 is ret in both x86 and x64
 
-        self.create_thread(no_op_function_pointer, false, None)?
-            .join()
-            .await?;
+        unsafe {
+            self.create_thread(no_op_function_pointer, false, None)?
+                .join()
+                .await?;
+        }
 
-        let injected_dll_path_pointer = self.allocate_memory(
-            library_path_c_string.to_bytes_with_nul().len(),
-            MemoryPermissions {
-                rwe: MemoryPermissionsRwe::ReadWrite,
-                is_guard: false,
-            },
-        )?;
+        let injected_dll_path_pointer = self
+            .allocate_memory(
+                library_path_c_string.to_bytes_with_nul().len(),
+                MemoryPermissions {
+                    rwe: MemoryPermissionsRwe::ReadWrite,
+                    is_guard: false,
+                },
+            )?
+            .cast();
         self.write(
             injected_dll_path_pointer,
             library_path_c_string.as_bytes_with_nul(),
@@ -646,9 +675,12 @@ impl Process {
                     0x5c, // pop rsp
                     0xc3, // ret
                 ];
-                function[14..][..8].copy_from_slice(&injected_dll_path_pointer.to_le_bytes());
-                function[24..][..8].copy_from_slice(&load_library_a_pointer.to_le_bytes());
-                function[48..][..8].copy_from_slice(&get_last_error_pointer.to_le_bytes());
+                function[14..][..8]
+                    .copy_from_slice(&(injected_dll_path_pointer as usize).to_le_bytes());
+                function[24..][..8]
+                    .copy_from_slice(&(load_library_a_pointer as usize).to_le_bytes());
+                function[48..][..8]
+                    .copy_from_slice(&(get_last_error_pointer as usize).to_le_bytes());
                 function
             } else {
                 let mut function = vec![
@@ -663,9 +695,12 @@ impl Process {
                     // return:
                     0xc3, // ret
                 ];
-                function[1..][..4].copy_from_slice(&injected_dll_path_pointer.to_le_bytes()[..4]);
-                function[6..][..4].copy_from_slice(&load_library_a_pointer.to_le_bytes()[..4]);
-                function[22..][..4].copy_from_slice(&get_last_error_pointer.to_le_bytes()[..4]);
+                function[1..][..4]
+                    .copy_from_slice(&(injected_dll_path_pointer as usize).to_le_bytes()[..4]);
+                function[6..][..4]
+                    .copy_from_slice(&(load_library_a_pointer as usize).to_le_bytes()[..4]);
+                function[22..][..4]
+                    .copy_from_slice(&(get_last_error_pointer as usize).to_le_bytes()[..4]);
                 function
             }
         };
@@ -676,15 +711,17 @@ impl Process {
                 is_guard: false,
             },
         )?;
-        self.write(load_dll_function_pointer, &load_dll_function)?;
+        self.write(load_dll_function_pointer.cast(), &load_dll_function)?;
 
-        match self
-            .create_thread(load_dll_function_pointer, false, None)?
-            .join()
-            .await?
-        {
-            0 => Ok(()),
-            error_code => Err(LoadLibraryThreadError { error_code }.into()),
+        unsafe {
+            match self
+                .create_thread(load_dll_function_pointer, false, None)?
+                .join()
+                .await?
+            {
+                0 => Ok(()),
+                error_code => Err(LoadLibraryThreadError { error_code }.into()),
+            }
         }
     }
 }
@@ -696,7 +733,7 @@ pub enum MemoryRegion {
 
 impl MemoryRegion {
     #[must_use]
-    pub fn address(&self) -> usize {
+    pub fn address(&self) -> *mut c_void {
         match self {
             MemoryRegion::Free(free_memory_region) => free_memory_region.address,
             MemoryRegion::Reserved(reserved_memory_region) => reserved_memory_region.address,
@@ -713,13 +750,13 @@ impl MemoryRegion {
 }
 
 pub struct FreeMemoryRegion {
-    address: usize,
+    address: *mut c_void,
     size: usize,
 }
 
 impl FreeMemoryRegion {
     #[must_use]
-    pub fn address(&self) -> usize {
+    pub fn address(&self) -> *mut c_void {
         self.address
     }
 
@@ -730,16 +767,16 @@ impl FreeMemoryRegion {
 }
 
 pub struct ReservedMemoryRegion {
-    address: usize,
+    address: *mut c_void,
     size: usize,
     is_committed: bool,
-    allocation_address: usize,
+    allocation_address: *mut c_void,
     permissions: MemoryPermissions,
 }
 
 impl ReservedMemoryRegion {
     #[must_use]
-    pub fn address(&self) -> usize {
+    pub fn address(&self) -> *mut c_void {
         self.address
     }
 
@@ -754,7 +791,7 @@ impl ReservedMemoryRegion {
     }
 
     #[must_use]
-    pub fn allocation_address(&self) -> usize {
+    pub fn allocation_address(&self) -> *mut c_void {
         self.allocation_address
     }
 

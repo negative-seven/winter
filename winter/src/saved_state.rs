@@ -1,13 +1,13 @@
 use itertools::Itertools;
 use shared::windows::{process, system, thread};
-use std::{collections::BTreeMap, io};
+use std::{collections::BTreeMap, ffi::c_void, io};
 use thiserror::Error;
 use tracing::{instrument, trace};
 
 pub(crate) struct SavedState {
     thread_contexts: BTreeMap<u32, thread::Context>,
     memory_allocations: Vec<MemoryAllocation>,
-    memory: BTreeMap<usize, Vec<u8>>,
+    memory: BTreeMap<*mut c_void, Vec<u8>>,
 }
 
 impl SavedState {
@@ -30,7 +30,7 @@ impl SavedState {
             if memory_region.is_committed() && !memory_region.permissions().is_guard {
                 memory.insert(
                     memory_region.address(),
-                    process.read_to_vec(memory_region.address(), memory_region.size())?,
+                    process.read_to_vec(memory_region.address().cast(), memory_region.size())?,
                 );
             }
         }
@@ -67,7 +67,7 @@ impl SavedState {
 
             let allocate_memory = |allocation: &MemoryAllocation| -> Result<(), LoadError> {
                 trace!(
-                    "allocating memory at {:#x} with size {:#x}",
+                    "allocating memory at {:p} with size {:#x}",
                     allocation.address,
                     allocation.size,
                 );
@@ -82,7 +82,7 @@ impl SavedState {
                 Ok(())
             };
             let free_memory = |allocation: &MemoryAllocation| -> Result<(), LoadError> {
-                trace!("freeing memory at {:#x}", allocation.address);
+                trace!("freeing memory at {:p}", allocation.address);
                 process.free_memory(allocation.address)?;
                 Ok(())
             };
@@ -98,7 +98,11 @@ impl SavedState {
                 }
                 (Some(current_memory_allocation), Some(saved_memory_allocation))
                     if current_memory_allocation.address
-                        < saved_memory_allocation.address + saved_memory_allocation.size =>
+                        < unsafe {
+                            saved_memory_allocation
+                                .address
+                                .byte_add(saved_memory_allocation.size)
+                        } =>
                 {
                     // current memory allocation overlaps or precedes saved memory allocation
                     free_memory(current_memory_allocation)?;
@@ -151,11 +155,11 @@ impl SavedState {
                 },
             );
             if let Ok(original_permissions) = set_permissions_result {
-                trace!("writing to {address:#x}");
-                process.write(address, bytes)?;
+                trace!("writing to {address:p}");
+                process.write(address.cast(), bytes)?;
                 process.set_memory_permissions(address, bytes.len(), original_permissions)?;
             } else {
-                trace!("skipping write to {address:#x}");
+                trace!("skipping write to {address:p}");
             }
         }
 
@@ -192,19 +196,19 @@ impl SavedState {
     ) -> Result<Vec<process::ReservedMemoryRegion>, process::GetMemoryRegionError> {
         let addressable_range = {
             let system_info = system::get_info();
-            (system_info.lpMinimumApplicationAddress as usize)
-                ..(system_info.lpMaximumApplicationAddress as usize)
+            (system_info.lpMinimumApplicationAddress.cast())
+                ..(system_info.lpMaximumApplicationAddress.cast())
         };
         let mut address = addressable_range.start;
         let mut regions = vec![];
         while address < addressable_range.end {
             let region = process.get_memory_region(address)?;
 
-            let address_overflow;
-            (address, address_overflow) = (region.address()).overflowing_add(region.size());
-            if address_overflow {
-                break;
+            let new_address = region.address().wrapping_byte_add(region.size());
+            if new_address < address {
+                break; // overflow
             }
+            address = new_address;
 
             if let process::MemoryRegion::Reserved(region) = region {
                 regions.push(region);
@@ -215,7 +219,7 @@ impl SavedState {
 }
 
 struct MemoryAllocation {
-    address: usize,
+    address: *mut c_void,
     size: usize,
     regions: Vec<process::ReservedMemoryRegion>,
 }

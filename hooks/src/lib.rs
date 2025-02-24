@@ -119,7 +119,7 @@ pub unsafe extern "system" fn initialize(initial_message_pointer: *mut u8) {
         ))
         .unwrap();
         process::Process::get_current()
-            .free_memory(initial_message_pointer as usize)
+            .free_memory(initial_message_pointer.cast())
             .unwrap();
         initialized_message_sender = initial_message.initialized_message_sender;
         LOG_MESSAGE_SENDER = MaybeUninit::new(Mutex::new(initial_message.log_message_sender));
