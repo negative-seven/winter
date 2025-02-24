@@ -34,12 +34,10 @@ use winapi::{
         },
         winbase::{CreateJobObjectA, CREATE_SUSPENDED, STARTF_USESTDHANDLES},
         winnt::{
-            JobObjectExtendedLimitInformation, IMAGE_DIRECTORY_ENTRY_EXPORT, IMAGE_DOS_HEADER,
-            IMAGE_EXPORT_DIRECTORY, IMAGE_FILE_HEADER, IMAGE_FILE_MACHINE_AMD64,
-            IMAGE_FILE_MACHINE_I386, IMAGE_FILE_MACHINE_IA64, IMAGE_FILE_MACHINE_UNKNOWN,
-            IMAGE_OPTIONAL_HEADER32, IMAGE_OPTIONAL_HEADER64, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT, MEM_FREE, MEM_RELEASE, MEM_RESERVE,
-            PROCESS_ALL_ACCESS,
+            JobObjectExtendedLimitInformation, IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386,
+            IMAGE_FILE_MACHINE_IA64, IMAGE_FILE_MACHINE_UNKNOWN,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, MEM_COMMIT,
+            MEM_FREE, MEM_RELEASE, MEM_RESERVE, PROCESS_ALL_ACCESS,
         },
         wow64apiset::IsWow64Process2,
     },
@@ -267,6 +265,13 @@ impl Process {
         }
     }
 
+    pub fn get_module(&self, name: &OsStr) -> Result<Option<Module>, GetModulesError> {
+        Ok(self
+            .get_modules()?
+            .into_iter()
+            .find(|m| m.get_name().is_ok_and(|n| n.eq_ignore_ascii_case(name))))
+    }
+
     pub fn allocate_memory(
         &self,
         size: usize,
@@ -460,128 +465,6 @@ impl Process {
         Ok(unsafe { Thread::from_raw_handle(thread_handle) })
     }
 
-    pub fn get_module_address(&self, name: &OsStr) -> Result<*mut c_void, GetModuleAddressError> {
-        for module in self.get_modules()? {
-            let module_name = module.get_name()?;
-            if module_name.to_ascii_lowercase() == name.to_ascii_lowercase() {
-                return Ok(module.get_base_address());
-            }
-        }
-        Err(ModuleNotFoundError.into())
-    }
-
-    pub fn get_export_address(
-        &self,
-        module_name: &OsStr,
-        export_name: impl AsRef<str>,
-    ) -> Result<*mut c_void, GetExportAddressError> {
-        enum OptionalHeader {
-            Header32(IMAGE_OPTIONAL_HEADER32),
-            Header64(IMAGE_OPTIONAL_HEADER64),
-        }
-        impl OptionalHeader {
-            fn data_directory_entry_count(&self) -> u32 {
-                match self {
-                    Self::Header32(header) => header.NumberOfRvaAndSizes,
-                    Self::Header64(header) => header.NumberOfRvaAndSizes,
-                }
-            }
-
-            fn export_table_address(&self) -> Option<u32> {
-                if self.data_directory_entry_count() < IMAGE_DIRECTORY_ENTRY_EXPORT.into() {
-                    None
-                } else {
-                    Some(
-                        match self {
-                            Self::Header32(header) => {
-                                header.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT as usize]
-                            }
-                            Self::Header64(header) => {
-                                header.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT as usize]
-                            }
-                        }
-                        .VirtualAddress,
-                    )
-                }
-            }
-        }
-
-        let export_name = export_name.as_ref();
-
-        let module_address = self.get_module_address(module_name)?;
-
-        unsafe {
-            let dos_header_address = module_address.cast::<IMAGE_DOS_HEADER>();
-            let dos_header = self.read(dos_header_address)?;
-            if dos_header.e_magic != 0x5a4d {
-                return Err(InvalidModuleHeadersError.into());
-            }
-
-            #[expect(clippy::cast_sign_loss)]
-            let pe_header_address = module_address.byte_add(dos_header.e_lfanew as usize).cast();
-            if self.read_to_vec(pe_header_address, 4)? != [0x50, 0x45, 0x0, 0x0] {
-                return Err(InvalidModuleHeadersError.into());
-            }
-
-            let optional_header_address = pe_header_address
-                .byte_add(4 + size_of::<IMAGE_FILE_HEADER>())
-                .cast::<c_void>();
-            let optional_header_magic = self.read_to_vec(optional_header_address.cast(), 2)?;
-            let optional_header = match (optional_header_magic[0], optional_header_magic[1]) {
-                (0xb, 0x1) => OptionalHeader::Header32(
-                    self.read::<IMAGE_OPTIONAL_HEADER32>(optional_header_address.cast())?,
-                ),
-                (0xb, 0x2) => OptionalHeader::Header64(
-                    self.read::<IMAGE_OPTIONAL_HEADER64>(optional_header_address.cast())?,
-                ),
-                _ => return Err(InvalidModuleHeadersError.into()),
-            };
-
-            let export_directory_table_address = module_address
-                .byte_add(
-                    optional_header
-                        .export_table_address()
-                        .ok_or(InvalidModuleHeadersError)? as usize,
-                )
-                .cast::<IMAGE_EXPORT_DIRECTORY>();
-            let export_directory_table = self.read(export_directory_table_address)?;
-
-            for index in 0..export_directory_table.NumberOfNames as usize {
-                let export_name_pointer = module_address
-                    .byte_add(
-                        self.read_u32(
-                            module_address
-                                .byte_add(
-                                    export_directory_table.AddressOfNames as usize + index * 4,
-                                )
-                                .cast(),
-                        )? as usize,
-                    )
-                    .cast();
-                let export_name_at_index = self.read_nul_terminated_string(export_name_pointer)?;
-                if export_name_at_index.to_lowercase() == export_name.to_lowercase() {
-                    let export_ordinal = self.read_u16(
-                        module_address
-                            .byte_add(
-                                export_directory_table.AddressOfNameOrdinals as usize + index * 2,
-                            )
-                            .cast(),
-                    )? as usize;
-                    let export_offset = self.read_u32(
-                        module_address
-                            .byte_add(
-                                export_directory_table.AddressOfFunctions as usize
-                                    + export_ordinal * 4,
-                            )
-                            .cast(),
-                    )? as usize;
-                    return Ok(module_address.byte_add(export_offset));
-                }
-            }
-        }
-        Err(ExportNotFoundError.into())
-    }
-
     pub fn get_memory_region(
         &self,
         address: *mut c_void,
@@ -647,10 +530,11 @@ impl Process {
             library_path_c_string.as_bytes_with_nul(),
         )?;
 
-        let load_library_a_pointer =
-            self.get_export_address(OsStr::new("kernel32.dll"), "LoadLibraryA")?;
-        let get_last_error_pointer =
-            self.get_export_address(OsStr::new("kernel32.dll"), "GetLastError")?;
+        let kernel32_module = self
+            .get_module(OsStr::new("kernel32.dll"))?
+            .expect("kernel32.dll module not found");
+        let load_library_a_pointer = kernel32_module.get_export_address("LoadLibraryA")?;
+        let get_last_error_pointer = kernel32_module.get_export_address("GetLastError")?;
         let load_dll_function = {
             if self.is_64_bit()? {
                 let mut function = vec![
@@ -987,36 +871,6 @@ pub struct WriteMemoryError(#[from] io::Error);
 pub struct CreateThreadError(#[from] io::Error);
 
 #[derive(Debug, Error)]
-#[error("failed to get module address")]
-pub enum GetModuleAddressError {
-    ProcessGetModules(#[from] GetModulesError),
-    ModuleGetName(#[from] module::GetNameError),
-    ModuleNotFound(#[from] ModuleNotFoundError),
-}
-
-#[derive(Debug, Error)]
-#[error("module not found")]
-pub struct ModuleNotFoundError;
-
-#[derive(Debug, Error)]
-#[error("failed to get export address")]
-pub enum GetExportAddressError {
-    GetModuleAddress(#[from] GetModuleAddressError),
-    ReadMemory(#[from] ReadMemoryError),
-    InvalidModuleHeaders(#[from] InvalidModuleHeadersError),
-    ExportNotFound(#[from] ExportNotFoundError),
-    Os(#[from] io::Error),
-}
-
-#[derive(Debug, Error)]
-#[error("invalid headers in module")]
-pub struct InvalidModuleHeadersError;
-
-#[derive(Debug, Error)]
-#[error("export not found in module")]
-pub struct ExportNotFoundError;
-
-#[derive(Debug, Error)]
 #[error("failed to get memory region metadata")]
 pub struct GetMemoryRegionError(#[from] io::Error);
 
@@ -1024,7 +878,8 @@ pub struct GetMemoryRegionError(#[from] io::Error);
 #[error("failed to inject dll")]
 pub enum InjectDllError {
     LibraryPathContainsNul(#[from] LibraryPathContainsNulError),
-    GetExportAddress(#[from] GetExportAddressError),
+    GetModules(#[from] GetModulesError),
+    ModuleGetExportAddress(#[from] module::GetExportAddressError),
     AllocateMemory(#[from] AllocateMemoryError),
     ReadMemory(#[from] ReadMemoryError),
     WriteMemory(#[from] WriteMemoryError),

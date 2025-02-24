@@ -6,7 +6,7 @@ use shared::{
     input::MouseButton,
     ipc::{self, message::Message, Sender},
     windows::{
-        event, pipe,
+        event, module, pipe,
         process::{self, CheckIs64BitError},
         thread,
     },
@@ -98,9 +98,12 @@ impl Conductor {
         )?;
         unsafe {
             subprocess.create_thread(
-                subprocess.get_export_address(OsStr::new(hooks_library), "initialize")?,
+                subprocess
+                    .get_module(OsStr::new(hooks_library))?
+                    .unwrap()
+                    .get_export_address("initialize")?,
                 false,
-                Some(initial_message_pointer as _),
+                Some(initial_message_pointer.cast()),
             )?;
         }
 
@@ -259,7 +262,8 @@ pub enum NewError {
     InjectDll(#[from] process::InjectDllError),
     ProcessAllocateMemory(#[from] process::AllocateMemoryError),
     ProcessWriteMemory(#[from] process::WriteMemoryError),
-    GetExportAddress(#[from] process::GetExportAddressError),
+    GetModules(#[from] process::GetModulesError),
+    ModuleGetExportAddress(#[from] module::GetExportAddressError),
     NewEvent(#[from] event::NewError),
     ProcessCreateThread(#[from] process::CreateThreadError),
     MessageReceive(#[from] ipc::ReceiveError),
