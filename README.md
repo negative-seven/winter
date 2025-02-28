@@ -6,7 +6,7 @@ A work-in-progress tool which runs Windows programs in a deterministic environme
 
 Prerequisites:
 
-* Rust toolchain version 1.76.0+ with the targets `i686-pc-windows-msvc` and `x86_64-pc-windows-msvc`
+* Rust toolchain version 1.81+ with the targets `i686-pc-windows-msvc` and `x86_64-pc-windows-msvc`
 * `cargo` package manager
 
 Run Winter with the following command:

@@ -26,7 +26,6 @@ unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 allow_attributes = "warn"
-pedantic = "warn"
-unused_trait_names = "warn"
-missing_errors_doc = "allow" # TODO
-missing_panics_doc = "allow" # TODO
+missing_errors_doc = "allow"                 # TODO
+missing_panics_doc = "allow"                 # TODO
+pedantic = { level = "warn", priority = -1 }
